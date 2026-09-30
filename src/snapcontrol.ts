@@ -505,7 +505,7 @@ class SnapControl {
                     refresh = this.onNotification(notification) || refresh;
                 }
             } else {
-                refresh = this.onNotification(json_msg);
+                this.onNotification(json_msg);
             }
             refresh = true;
 

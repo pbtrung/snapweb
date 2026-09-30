@@ -151,7 +151,7 @@ export default function SnapWeb() {
     try {
       const group = snapControlRef.current.getGroupFromClient(SnapStream.getClientId());
       return snapControlRef.current.getStream(group.stream_id).id;
-    } catch (e) {
+    } catch {
       return "";
     }
   }
@@ -217,7 +217,7 @@ export default function SnapWeb() {
       mediaSession.setActionHandler('nexttrack', properties.canGoNext ? () => { snapControlRef.current.control(streamId, 'next') } : null);
       try {
         mediaSession.setActionHandler('stop', properties.canControl ? () => { snapControlRef.current.control(streamId, 'stop') } : null);
-      } catch (error) {
+      } catch {
         console.debug('Warning! The "stop" media session action is not supported.');
       }
       const defaultSkipTime: number = 10; // Time to skip in seconds by default
@@ -243,7 +243,7 @@ export default function SnapWeb() {
             Math.min(position, metadata.duration!);
           snapControlRef.current.control(streamId, 'setPosition', { 'position': position })
         } : null);
-      } catch (error) {
+      } catch {
         console.debug('Warning! The "seekto" media session action is not supported.');
       }
 

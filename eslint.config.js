@@ -26,9 +26,9 @@ export default tseslint.config(
 
       // Manually added rules
 
-      "no-unused-vars": ["error", {
-        argsIgnorePattern: "^_",
-      }],
+      // Superseded by @typescript-eslint/no-unused-vars, which understands
+      // TypeScript constructs such as enum members
+      "no-unused-vars": "off",
 
       "@typescript-eslint/no-unused-vars": ["error", {
         argsIgnorePattern: "^_",
