@@ -6,6 +6,8 @@ mobile devices, with the look and feel of
 
 ## Develop
 
+Requires Node.js 20.19+ or 22.12+.
+
 1. Add your snapserver host as a local environment var
     ```bash
     echo 'VITE_APP_SNAPSERVER_HOST = localhost:1780' > .env.local
@@ -19,6 +21,21 @@ mobile devices, with the look and feel of
     npm run dev
     ```
 
+### Test
+
+- Unit and component tests (Vitest, jsdom): `npm test`
+- With a coverage report in `coverage/`: `npm run test:coverage`
+- Integration tests against a real Snapserver. They change and restore live
+  server state, see [tests/integration/README.md](tests/integration/README.md):
+    ```bash
+    SNAPSERVER_URL=ws://<snapserver host>:1780 npm run test:integration
+    ```
+
+### Code style
+
+- Format with Prettier: `npm run format` (`npm run format:check` only checks)
+- Lint with ESLint: `npm run lint`
+
 ## Build for production
 
 1. Install dependencies: `npm ci`
@@ -29,29 +46,10 @@ mobile devices, with the look and feel of
    `http://<snapserver host>:1780`
 1. Enjoy :)
 
-Prebuilt versions can be downloaded as zip archive or debian package in [Releases](https://github.com/snapcast/snapweb/releases).
+Prebuilt versions of upstream Snapweb can be downloaded as zip archive or
+debian package in [Releases](https://github.com/snapcast/snapweb/releases).
 
 ## Setup as WebApp
 
 On Android open `http://<snapserver host>:1780` in Chrome and select in the menu
 `Add to homescreen`
-
-## Screenshot
-
-Screenshot is taken on a Pixel 7 emulation in Chrome DevTools
-
-![Snapweb-Dark](docs/images/snapweb_dark.png#gh-dark-mode-only)
-![Snapweb-Light](docs/images/snapweb_light.png#gh-light-mode-only)
-
-## Contributing
-
-Since my time and my web development skills are limited, pull requests are
-highly appreciated. Please check the list of
-[open issues](https://github.com/snapcast/snapweb/issues).\
-Branch from the `develop` branch and ensure it is up to date with the current
-`develop` branch before submitting your pull request.
-
-High prio issues:
-
-- Missing opus support [#8](https://github.com/snapcast/snapweb/issues/8)
-- Missing Vorbis support [#14](https://github.com/snapcast/snapweb/issues/14)

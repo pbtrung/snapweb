@@ -1,5 +1,47 @@
 # Snapweb changelog
 
+## Version 0.9999
+
+### Bugfixes
+
+- Fix time sync median, which sorted clock offsets as strings (PR #165)
+- Fix audio playing about 6 dB too quiet, fix non-ASCII names being
+  truncated in stream messages, fix a color scheme listener leaking on every
+  render, fix NaN group volume for empty groups (PR #166)
+- Fix audio sync: measure the server time on the clock buffers are scheduled
+  on, so the output latency is no longer counted twice, which made Snapweb
+  play ahead of other clients
+- Fix startup sync: ignore time replies measured on the previous clock, sync
+  with a burst of requests and play silence until synced instead of dropping
+  chunks
+- Fix swapped sent/received timestamps when reading message headers
+- Ignore messages from the previous server after switching servers, and don't
+  drop a batch of notifications because one refers to an unknown client
+- Fix React hooks issues: state and props mutated during render, callbacks
+  reassigned on every render, setState in effects
+- Don't start playback when stopped before the audio code finished loading
+
+### Features
+
+- Load the audio stream and decoders on first playback, and split the
+  bundle into cacheable vendor chunks (initial load 1.1 MB -> about 560 kB)
+
+### General
+
+- Update packages: MUI 9, Vite 8, ESLint 10, TypeScript 6
+- Switch to @vitejs/plugin-react, replace the deprecated glob 11
+- Add unit, component and Snapserver integration tests (Vitest)
+- Add Prettier and format the codebase
+- Remove CI workflow, dependabot, Debian packaging and devcontainer setup
+- Remove README screenshots and the Contributing section
+
+### Contributors
+
+- @pbtrung
+- @xn101de
+
+_Trung Pham <pbtrung@outlook.com>  Wed, 30 Sep 2026 13:58:45 -0700_
+
 ## Version 0.9.3
 
 ### Bugfixes
