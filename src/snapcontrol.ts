@@ -292,6 +292,8 @@ class SnapControl {
         if (this.timer)
             clearTimeout(this.timer);
         if (this.connection) {
+            // Ignore anything the old connection still delivers
+            this.connection.onmessage = () => { };
             this.connection.onclose = () => { };
             if (this.connection.readyState === WebSocket.OPEN) {
                 this.connection.close();
@@ -500,12 +502,13 @@ class SnapControl {
             }
         }
         else {
-            if (Array.isArray(json_msg)) {
-                for (const notification of json_msg) {
-                    refresh = this.onNotification(notification) || refresh;
+            for (const notification of Array.isArray(json_msg) ? json_msg : [json_msg]) {
+                try {
+                    this.onNotification(notification);
+                } catch (e) {
+                    // e.g. a client or group this model doesn't know (yet)
+                    console.warn('Failed to apply ' + notification.method + ': ' + e);
                 }
-            } else {
-                this.onNotification(json_msg);
             }
             refresh = true;
 

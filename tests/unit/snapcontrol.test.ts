@@ -392,6 +392,26 @@ describe('SnapControl', () => {
       expect(onChange).toHaveBeenCalledTimes(1);
     });
 
+    it('skips notifications for unknown clients and applies the rest', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+      ws.receive([
+        { jsonrpc: '2.0', method: 'Client.OnDisconnect', params: { id: 'gone', client: makeClient('gone') } },
+        { jsonrpc: '2.0', method: 'Group.OnMute', params: { id: 'g1', mute: true } },
+      ]);
+
+      expect(control.getGroup('g1').muted).toBe(true);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Client.OnDisconnect'));
+    });
+
+    it('ignores messages from a connection after disconnecting', () => {
+      control.disconnect();
+      notify('Group.OnMute', { id: 'g1', mute: true });
+
+      expect(control.getGroup('g1').muted).toBe(false);
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
     it('works without an onChange handler', () => {
       control.onChange = null;
       expect(() => notify('Group.OnMute', { id: 'g1', mute: true })).not.toThrow();
