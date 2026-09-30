@@ -10,7 +10,8 @@ SNAPSERVER_URL=ws://10.10.1.1:1780 npm run test:integration
 They change live server state, so they:
 
 - restore every setting they change (client volume, mute, name and latency,
-  group mute and stream) and verify the restore with a fresh `Server.GetStatus`
+  group mute and stream), wait for the restore to arrive even when the test
+  fails, and verify it with a fresh `Server.GetStatus` when it passes
 - pick offline clients and groups first, so nothing audible changes when an
   offline one exists
 - never delete or regroup existing clients, or send playback commands

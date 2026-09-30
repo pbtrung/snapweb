@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { SnapControl, Snapcast } from '../../src/snapcontrol';
 import { FakeWebSocket } from '../helpers/fakeWebSocket';
+import { quietConsole } from '../helpers/snapControl';
 import { makeClient, makeServerStatus, makeStream } from '../fixtures/serverStatus';
 
 describe('Snapcast model', () => {
@@ -104,9 +105,7 @@ describe('SnapControl', () => {
   beforeEach(() => {
     FakeWebSocket.reset();
     vi.stubGlobal('WebSocket', FakeWebSocket);
-    vi.spyOn(console, 'debug').mockImplementation(() => {});
-    vi.spyOn(console, 'info').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    quietConsole({ errors: true });
     control = new SnapControl();
     onChange = vi.fn<NonNullable<SnapControl['onChange']>>();
     onConnectionChanged = vi.fn<NonNullable<SnapControl['onConnectionChanged']>>();

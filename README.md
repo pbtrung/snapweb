@@ -6,7 +6,7 @@ mobile devices, with the look and feel of
 
 ## Develop
 
-Requires Node.js 20.19+ or 22.12+.
+Requires Node.js 22.22.2+, 24.15+ or 26+ (see `engines` in `package.json`).
 
 1. Add your snapserver host as a local environment var
     ```bash

@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SettingsDialog from '../../src/components/Settings';
 import { config, Theme } from '../../src/config';
+import { quietConsole } from '../helpers/snapControl';
 
 describe('SettingsDialog', () => {
   beforeEach(() => {
@@ -10,7 +11,7 @@ describe('SettingsDialog', () => {
     config.baseUrl = 'ws://old:1780';
     config.theme = Theme.Light;
     config.showOffline = false;
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    quietConsole();
   });
 
   it('shows the current settings', () => {

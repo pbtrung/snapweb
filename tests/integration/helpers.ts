@@ -26,9 +26,15 @@ export async function waitFor<T>(
 export async function connect(): Promise<SnapControl> {
   const control = new SnapControl();
   control.connect(serverUrl);
-  // Notifications can arrive before the status response, so wait for the
-  // status itself rather than any onChange
-  await waitFor(() => control.server.server !== undefined, 'the server status from ' + serverUrl);
+  try {
+    // Notifications can arrive before the status response, so wait for the
+    // status itself rather than any onChange
+    await waitFor(() => control.server.server !== undefined, 'the server status from ' + serverUrl);
+  } catch (e) {
+    // Otherwise it keeps reconnecting in the background
+    control.disconnect();
+    throw e;
+  }
   return control;
 }
 

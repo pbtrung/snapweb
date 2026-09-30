@@ -21,6 +21,8 @@ export function requests(ws: FakeWebSocket, method: string): any[] {
   return ws.sent.filter((m) => m.method === method);
 }
 
-export function quietConsole() {
-  for (const level of ['debug', 'log', 'info'] as const) vi.spyOn(console, level).mockImplementation(() => {});
+// Silence the app's logging; `errors` also silences expected errors and warnings
+export function quietConsole({ errors = false } = {}) {
+  const levels = ['debug', 'log', 'info', ...(errors ? (['warn', 'error'] as const) : [])] as const;
+  for (const level of levels) vi.spyOn(console, level).mockImplementation(() => {});
 }

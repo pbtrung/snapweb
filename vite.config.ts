@@ -34,11 +34,11 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'logo.svg'],
       manifest: {
         name: 'Snapweb - Snapcast web client',
         short_name: 'Snapweb',
-        theme_color: '#ffffff',
+        theme_color: '#607d8b',
         icons: [
           {
             src: 'pwa-64x64.png',

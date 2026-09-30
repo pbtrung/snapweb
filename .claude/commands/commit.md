@@ -22,7 +22,7 @@ description: Commit staged/modified changes with a detailed message and push, no
      re-run before continuing.
    - `.prettierignore` skips `dist/`, `coverage/`, `package-lock.json`, `.claude/`
      and Markdown files — don't pass explicit paths that would format those.
-   - ESLint already ignores `dist/`, `debian/` and `coverage/`
+   - ESLint already ignores `dist/` and `coverage/`
      (`eslint.config.js`) — don't pass explicit paths that would pull those in.
 3. If nothing is staged, stage all relevant modified/new files with `git add`.
 4. Write a **detailed** commit message:
@@ -49,4 +49,4 @@ description: Commit staged/modified changes with a detailed message and push, no
 - Never include Claude/AI co-authorship or attribution in the commit message.
 - Always push after committing — don't stop at just the local commit.
 - If the push fails (e.g. diverged branch), report the error and ask before force-pushing or rebasing.
-- Never commit build output (`dist/`) or `.env` changes such as the CI-injected `VITE_APP_GITREV`.
+- Never commit build output (`dist/`) or local `.env` changes, such as a `VITE_APP_GITREV`.

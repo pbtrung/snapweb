@@ -68,13 +68,14 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
           percent: percent,
         });
       } finally {
+        // Confirm the restore here, so it is also checked when the test fails
         actor.setVolume(client.id, original.percent, original.muted);
+        await waitFor(
+          () => observer.getClient(client.id).config.volume.percent === original.percent,
+          'the volume to be restored',
+        );
       }
 
-      await waitFor(
-        () => observer.getClient(client.id).config.volume.percent === original.percent,
-        'the volume to be restored',
-      );
       expect((await fetchStatus()).getClient(client.id)!.config.volume).toEqual(original);
     });
 
@@ -92,9 +93,9 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
         // original even if it is empty
         actor.getClient(client.id).config.name = name;
         actor.setClientName(client.id, original);
+        await waitFor(() => observer.getClient(client.id).config.name === original, 'the name to be restored');
       }
 
-      await waitFor(() => observer.getClient(client.id).config.name === original, 'the name to be restored');
       expect((await fetchStatus()).getClient(client.id)!.config.name).toBe(original);
     });
 
@@ -110,9 +111,9 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
         expect((await fetchStatus()).getClient(client.id)!.config.latency).toBe(latency);
       } finally {
         actor.setClientLatency(client.id, original);
+        await waitFor(() => observer.getClient(client.id).config.latency === original, 'the latency to be restored');
       }
 
-      await waitFor(() => observer.getClient(client.id).config.latency === original, 'the latency to be restored');
       expect((await fetchStatus()).getClient(client.id)!.config.latency).toBe(original);
     });
   });
@@ -128,9 +129,9 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
         expect((await fetchStatus()).getGroup(group.id)!.muted).toBe(!original);
       } finally {
         actor.muteGroup(group.id, original);
+        await waitFor(() => observer.getGroup(group.id).muted === original, 'the mute state to be restored');
       }
 
-      await waitFor(() => observer.getGroup(group.id).muted === original, 'the mute state to be restored');
       expect((await fetchStatus()).getGroup(group.id)!.muted).toBe(original);
     });
 
@@ -146,9 +147,10 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
         expect((await fetchStatus()).getGroup(group.id)!.stream_id).toBe(other);
       } finally {
         actor.setStream(group.id, original);
+        await waitFor(() => observer.getGroup(group.id).stream_id === original, 'the stream to be restored');
       }
 
-      await waitFor(() => observer.getGroup(group.id).stream_id === original, 'the stream to be restored');
+      expect((await fetchStatus()).getGroup(group.id)!.stream_id).toBe(original);
     });
   });
 
