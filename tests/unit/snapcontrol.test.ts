@@ -91,12 +91,12 @@ describe('SnapControl', () => {
   let onChange: Mock<NonNullable<SnapControl['onChange']>>;
   let onConnectionChanged: Mock<NonNullable<SnapControl['onConnectionChanged']>>;
 
-  function connected(): FakeWebSocket {
+  function connected(status = makeServerStatus()): FakeWebSocket {
     control.connect('ws://snapserver:1780');
     const ws = FakeWebSocket.latest();
     ws.open();
     const request = ws.lastSent();
-    ws.receive({ id: request.id, jsonrpc: '2.0', result: { server: makeServerStatus() } });
+    ws.receive({ id: request.id, jsonrpc: '2.0', result: { server: status } });
     onChange.mockClear();
     onConnectionChanged.mockClear();
     return ws;
@@ -197,6 +197,32 @@ describe('SnapControl', () => {
       expect(FakeWebSocket.instances).toHaveLength(1);
     });
 
+    it('closes a socket that is still connecting, and ignores its late open', () => {
+      control.connect('ws://first:1780');
+      const first = FakeWebSocket.latest();
+      control.connect('ws://second:1780');
+      const second = FakeWebSocket.latest();
+
+      expect(first.readyState).toBe(FakeWebSocket.CLOSED);
+      first.open();
+      expect(first.sent).toEqual([]);
+      expect(second.sent).toEqual([]);
+      expect(onConnectionChanged).not.toHaveBeenCalledWith(control, true);
+    });
+
+    it('does not send while not connected', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      control.connect('ws://snapserver:1780');
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', result: { server: makeServerStatus() } });
+      ws.readyState = FakeWebSocket.CLOSED;
+
+      expect(() => control.setVolume('c1', 10)).not.toThrow();
+      expect(ws.sent).toHaveLength(1);
+      expect(warn).toHaveBeenCalledWith('Not connected, dropping Client.SetVolume');
+    });
+
     it('cancels a pending reconnect on disconnect', () => {
       vi.useFakeTimers();
       control.connect('ws://snapserver:1780');
@@ -238,7 +264,12 @@ describe('SnapControl', () => {
       control.getClient('c1').connected = false;
       expect(control.getGroupVolume(g1, true)).toBe(0);
 
-      expect(control.getGroupVolume(new Snapcast.Group({ clients: [] }), false)).toBe(0);
+      expect(
+        control.getGroupVolume(
+          new Snapcast.Group({ id: 'empty', name: '', stream_id: 's1', muted: false, clients: [] }),
+          false,
+        ),
+      ).toBe(0);
     });
   });
 
@@ -289,6 +320,16 @@ describe('SnapControl', () => {
       control.setClientLatency('c1', 30);
       expect(ws.lastSent()).toMatchObject({ method: 'Client.SetLatency', params: { id: 'c1', latency: 30 } });
       expect(control.getClient('c1').config.latency).toBe(30);
+    });
+
+    it('drops every group left empty, including adjacent ones', () => {
+      const status = makeServerStatus();
+      status.groups.push({ clients: [makeClient('c4')], id: 'g3', muted: false, name: '', stream_id: 's1' });
+      ws = connected(status);
+      control.deleteClient('c3');
+      control.deleteClient('c4');
+
+      expect(control.server.groups.map((g) => g.id)).toEqual(['g1']);
     });
 
     it('deletes a client and drops its group once empty', () => {
@@ -376,6 +417,11 @@ describe('SnapControl', () => {
 
       notify('Group.OnStreamChanged', { id: 'g1', stream_id: 's2' });
       expect(control.getGroup('g1').stream_id).toBe('s2');
+    });
+
+    it('applies Group.OnNameChanged', () => {
+      notify('Group.OnNameChanged', { id: 'g1', name: 'Downstairs' });
+      expect(control.getGroup('g1').name).toBe('Downstairs');
     });
 
     it('applies Stream.OnUpdate and Stream.OnProperties', () => {

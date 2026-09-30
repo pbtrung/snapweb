@@ -1,9 +1,8 @@
-const host = import.meta.env.VITE_APP_SNAPSERVER_HOST || window.location.host;
-
 const keys = {
   snapserver_host: 'snapserver.host',
   theme: 'theme',
   showoffline: 'showoffline',
+  clientId: 'uniqueId',
 };
 
 enum Theme {
@@ -12,21 +11,37 @@ enum Theme {
   Dark = 'dark',
 }
 
+// Storage may be missing, or throw when site data is blocked or full; the
+// app then keeps working with defaults for this page load
+function storage(): Storage | undefined {
+  try {
+    return window.localStorage ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function setPersistentValue(key: string, value: string) {
-  if (window.localStorage) {
-    window.localStorage.setItem(key, value);
+  try {
+    storage()?.setItem(key, value);
+  } catch (e) {
+    console.warn('Failed to store ' + key + ': ' + e);
+  }
+}
+
+function readPersistentValue(key: string): string | undefined {
+  try {
+    return storage()?.getItem(key) ?? undefined;
+  } catch (e) {
+    console.warn('Failed to read ' + key + ': ' + e);
+    return undefined;
   }
 }
 
 function getPersistentValue(key: string, defaultValue: string = ''): string {
-  if (window.localStorage) {
-    const value = window.localStorage.getItem(key);
-    if (value !== null) {
-      return value;
-    }
-    window.localStorage.setItem(key, defaultValue);
-    return defaultValue;
-  }
+  const value = readPersistentValue(key);
+  if (value !== undefined) return value;
+  setPersistentValue(key, defaultValue);
   return defaultValue;
 }
 
@@ -46,23 +61,45 @@ function uuidv4(): string {
   });
 }
 
+// Generated once per page load, so the audio stream and the media session
+// agree on the id even when it can't be stored
+let generatedClientId: string | undefined;
+
 // The id this browser registers with on the audio stream, created once
 function getClientId(): string {
-  return getPersistentValue('uniqueId', uuidv4());
+  const stored = readPersistentValue(keys.clientId);
+  if (stored) return stored;
+  generatedClientId ??= uuidv4();
+  setPersistentValue(keys.clientId, generatedClientId);
+  return generatedClientId;
+}
+
+function defaultBaseUrl(): string {
+  const host = import.meta.env.VITE_APP_SNAPSERVER_HOST || window.location.host;
+  return (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + host;
+}
+
+// Accepts "host:1780", "http(s)://host:1780" or "ws(s)://host:1780/" and
+// returns "ws(s)://host:1780", which the /jsonrpc and /stream paths are
+// appended to. An empty value means the default.
+function normalizeBaseUrl(value: string): string {
+  let url = value.trim().replace(/\/+$/, '');
+  if (url === '') return defaultBaseUrl();
+  url = url.replace(/^http(s?):\/\//i, (_, secure: string) => (secure ? 'wss://' : 'ws://'));
+  if (!/^wss?:\/\//i.test(url)) url = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + url;
+  return url;
 }
 
 const config = {
   get baseUrl() {
-    return getPersistentValue(
-      keys.snapserver_host,
-      (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + host,
-    );
+    return normalizeBaseUrl(getPersistentValue(keys.snapserver_host, defaultBaseUrl()));
   },
   set baseUrl(value) {
-    setPersistentValue(keys.snapserver_host, value);
+    setPersistentValue(keys.snapserver_host, normalizeBaseUrl(value));
   },
   get theme() {
-    return getPersistentValue(keys.theme, Theme.System.toString()) as Theme;
+    const theme = getPersistentValue(keys.theme, Theme.System);
+    return Object.values(Theme).includes(theme as Theme) ? (theme as Theme) : Theme.System;
   },
   set theme(value: Theme) {
     setPersistentValue(keys.theme, value);
@@ -75,4 +112,4 @@ const config = {
   },
 };
 
-export { config, getClientId, getPersistentValue, setPersistentValue, Theme };
+export { config, getClientId, getPersistentValue, normalizeBaseUrl, setPersistentValue, Theme, uuidv4 };

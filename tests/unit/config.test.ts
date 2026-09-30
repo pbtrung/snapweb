@@ -1,5 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { config, getClientId, getPersistentValue, setPersistentValue, Theme } from '../../src/config';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  config,
+  getClientId,
+  getPersistentValue,
+  normalizeBaseUrl,
+  setPersistentValue,
+  Theme,
+  uuidv4,
+} from '../../src/config';
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 describe('config', () => {
   beforeEach(() => {
@@ -41,8 +51,56 @@ describe('config', () => {
 
   it('creates the client id once and keeps it', () => {
     const id = getClientId();
-    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(id).toMatch(uuidPattern);
     expect(getClientId()).toBe(id);
     expect(window.localStorage.getItem('uniqueId')).toBe(id);
+  });
+
+  it('falls back to the system theme for unknown stored values', () => {
+    window.localStorage.setItem('theme', 'purple');
+    expect(config.theme).toBe(Theme.System);
+  });
+
+  it('keeps working when storage throws', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+
+    expect(config.showOffline).toBe(false);
+    expect(() => (config.showOffline = true)).not.toThrow();
+    const id = getClientId();
+    expect(getClientId()).toBe(id);
+  });
+
+  it('generates UUIDs without crypto.randomUUID', () => {
+    vi.stubGlobal('crypto', {});
+    expect(uuidv4()).toMatch(uuidPattern);
+  });
+});
+
+describe('normalizeBaseUrl', () => {
+  it.each([
+    ['ws://host:1780', 'ws://host:1780'],
+    ['wss://host:1780', 'wss://host:1780'],
+    ['ws://host:1780/', 'ws://host:1780'],
+    ['  ws://host:1780//  ', 'ws://host:1780'],
+    ['host:1780', 'ws://host:1780'],
+    ['http://host:1780', 'ws://host:1780'],
+    ['HTTPS://host:1780', 'wss://host:1780'],
+  ])('turns %j into %j', (input, expected) => {
+    expect(normalizeBaseUrl(input)).toBe(expected);
+  });
+
+  it('uses the default for an empty value', () => {
+    expect(normalizeBaseUrl('  ')).toBe('ws://' + window.location.host);
+  });
+
+  it('stores the normalized url', () => {
+    config.baseUrl = 'host:1780/';
+    expect(window.localStorage.getItem('snapserver.host')).toBe('ws://host:1780');
   });
 });

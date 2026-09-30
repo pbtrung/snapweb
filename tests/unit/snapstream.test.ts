@@ -187,12 +187,6 @@ describe('SnapStream.getClientId', () => {
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(SnapStream.getClientId()).toBe(id);
   });
-
-  it('falls back to a Math.random UUID without crypto.randomUUID', () => {
-    window.localStorage.clear();
-    vi.stubGlobal('crypto', {});
-    expect(SnapStream.getClientId()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  });
 });
 
 describe('AudioStream', () => {

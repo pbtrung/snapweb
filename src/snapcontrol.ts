@@ -1,10 +1,88 @@
+// JSON shapes of the Snapcast control API (Server.GetStatus and notifications)
+interface HostJson {
+  arch: string;
+  ip: string;
+  mac: string;
+  name: string;
+  os: string;
+}
+
+interface VolumeJson {
+  muted: boolean;
+  percent: number;
+}
+
+interface ClientJson {
+  id: string;
+  host: HostJson;
+  snapclient: { name: string; protocolVersion: number; version: string };
+  config: { instance: number; latency: number; name: string; volume: VolumeJson };
+  lastSeen: { sec: number; usec: number };
+  connected: boolean;
+}
+
+interface GroupJson {
+  id: string;
+  name: string;
+  stream_id: string;
+  muted: boolean;
+  clients: ClientJson[];
+}
+
+interface MetadataJson {
+  title?: string;
+  artist?: string[];
+  album?: string;
+  artUrl?: string;
+  duration?: number;
+}
+
+interface PropertiesJson {
+  loopStatus?: string;
+  shuffle?: boolean;
+  volume?: number;
+  rate?: number;
+  playbackStatus?: 'stopped' | 'paused' | 'playing';
+  position?: number;
+  minimumRate?: number;
+  maximumRate?: number;
+  canGoNext?: boolean;
+  canGoPrevious?: boolean;
+  canPlay?: boolean;
+  canPause?: boolean;
+  canSeek?: boolean;
+  canControl?: boolean;
+  metadata?: MetadataJson;
+}
+
+interface StreamJson {
+  id: string;
+  status: string;
+  uri: { raw: string; scheme: string; host: string; path: string; fragment: string; query: Record<string, string> };
+  properties?: PropertiesJson;
+}
+
+interface ServerJson {
+  groups: GroupJson[];
+  server: {
+    host: HostJson;
+    snapserver: { controlProtocolVersion: number; name: string; protocolVersion: number; version: string };
+  };
+  streams: StreamJson[];
+}
+
+interface Notification {
+  method: string;
+  params: any;
+}
+
 namespace Snapcast {
   export class Host {
-    constructor(json: any) {
+    constructor(json: HostJson) {
       this.fromJson(json);
     }
 
-    fromJson(json: any) {
+    fromJson(json: HostJson) {
       this.arch = json.arch;
       this.ip = json.ip;
       this.mac = json.mac;
@@ -20,11 +98,11 @@ namespace Snapcast {
   }
 
   export class Client {
-    constructor(json: any) {
+    constructor(json: ClientJson) {
       this.fromJson(json);
     }
 
-    fromJson(json: any) {
+    fromJson(json: ClientJson) {
       this.id = json.id;
       this.host = new Host(json.host);
       const jsnapclient = json.snapclient;
@@ -72,16 +150,16 @@ namespace Snapcast {
   }
 
   export class Group {
-    constructor(json: any) {
+    constructor(json: GroupJson) {
       this.fromJson(json);
     }
 
-    fromJson(json: any) {
+    fromJson(json: GroupJson) {
       this.name = json.name;
       this.id = json.id;
       this.stream_id = json.stream_id;
       this.muted = Boolean(json.muted);
-      for (const client of json.clients) this.clients.push(new Client(client));
+      this.clients = json.clients.map((client) => new Client(client));
     }
 
     name: string = '';
@@ -99,11 +177,11 @@ namespace Snapcast {
   }
 
   export class Metadata {
-    constructor(json: any) {
+    constructor(json: MetadataJson) {
       this.fromJson(json);
     }
 
-    fromJson(json: any) {
+    fromJson(json: MetadataJson) {
       this.title = json.title;
       this.artist = json.artist;
       this.album = json.album;
@@ -118,14 +196,12 @@ namespace Snapcast {
     duration?: number;
   }
 
-  type PlaybackStatus = 'stopped' | 'paused' | 'playing';
-
   export class Properties {
-    constructor(json: any) {
+    constructor(json: PropertiesJson) {
       this.fromJson(json);
     }
 
-    fromJson(json: any) {
+    fromJson(json: PropertiesJson) {
       this.loopStatus = json.loopStatus;
       this.shuffle = json.shuffle;
       this.volume = json.volume;
@@ -151,7 +227,7 @@ namespace Snapcast {
     shuffle?: boolean;
     volume?: number;
     rate?: number;
-    playbackStatus?: PlaybackStatus;
+    playbackStatus?: PropertiesJson['playbackStatus'];
     position?: number;
     minimumRate?: number;
     maximumRate?: number;
@@ -165,18 +241,14 @@ namespace Snapcast {
   }
 
   export class Stream {
-    constructor(json: any) {
+    constructor(json: StreamJson) {
       this.fromJson(json);
     }
 
-    fromJson(json: any) {
+    fromJson(json: StreamJson) {
       this.id = json.id;
       this.status = json.status;
-      if (json.properties !== undefined) {
-        this.properties = new Properties(json.properties);
-      } else {
-        this.properties = new Properties({});
-      }
+      this.properties = new Properties(json.properties ?? {});
       const juri = json.uri;
       this.uri = {
         raw: juri.raw,
@@ -196,21 +268,20 @@ namespace Snapcast {
       host: string;
       path: string;
       fragment: string;
-      query: string;
+      query: Record<string, string>;
     };
 
     properties!: Properties;
   }
 
   export class Server {
-    constructor(json?: any) {
+    constructor(json?: ServerJson) {
       if (json) this.fromJson(json);
     }
 
-    fromJson(json: any) {
-      this.groups = [];
-      for (const jgroup of json.groups) this.groups.push(new Group(jgroup));
-      const jsnapserver: any = json.server.snapserver;
+    fromJson(json: ServerJson) {
+      this.groups = json.groups.map((group) => new Group(group));
+      const jsnapserver = json.server.snapserver;
       this.server = {
         host: new Host(json.server.host),
         snapserver: {
@@ -220,10 +291,7 @@ namespace Snapcast {
           version: jsnapserver.version,
         },
       };
-      this.streams = [];
-      for (const jstream of json.streams) {
-        this.streams.push(new Stream(jstream));
-      }
+      this.streams = json.streams.map((stream) => new Stream(stream));
     }
 
     groups: Group[] = [];
@@ -262,96 +330,93 @@ namespace Snapcast {
   }
 }
 
-// interface OnChange { (_server: Snapcast.Server): void }
-// interface OnStreamChange { (id: string): void };
+// Time to wait before reconnecting after the control connection is lost
+const RECONNECT_DELAY_MS = 1000;
 
 class SnapControl {
-  constructor() {
-    this.onChange = null;
-    this.onConnectionChanged = null;
-    this.server = new Snapcast.Server();
-    this.msg_id = 0;
-    this.status_req_id = -1;
-    this.timer = null;
-  }
+  onChange: ((_this: SnapControl, _server: Snapcast.Server) => void) | null = null;
+  onConnectionChanged: ((_this: SnapControl, _connected: boolean, _error?: string) => void) | null = null;
+  connection?: WebSocket;
+  server: Snapcast.Server = new Snapcast.Server();
+  msg_id: number = 0;
+  status_req_id: number = -1;
+  timer: ReturnType<typeof setTimeout> | null = null;
 
   public connect(baseUrl: string) {
     this.disconnect();
     try {
-      this.connection = new WebSocket(baseUrl + '/jsonrpc');
-      this.connection.onmessage = (msg: MessageEvent) => this.onMessage(msg.data);
-      this.connection.onopen = () => {
+      const connection = new WebSocket(baseUrl + '/jsonrpc');
+      this.connection = connection;
+      connection.onmessage = (msg: MessageEvent) => this.onMessage(msg.data);
+      connection.onopen = () => {
         this.status_req_id = this.sendRequest('Server.GetStatus');
-        if (this.onConnectionChanged) this.onConnectionChanged(this, true);
+        this.onConnectionChanged?.(this, true);
       };
-      this.connection.onerror = (ev: Event) => {
-        console.error('error:', ev);
+      connection.onerror = (ev: Event) => {
+        console.error('Control connection error:', ev);
       };
-      this.connection.onclose = () => {
-        if (this.onConnectionChanged) this.onConnectionChanged(this, false, 'Connection lost, trying to reconnect.');
-        console.info('connection lost, reconnecting in 1s');
-        this.timer = setTimeout(() => this.connect(baseUrl), 1000);
+      connection.onclose = () => {
+        this.onConnectionChanged?.(this, false, 'Connection lost, trying to reconnect.');
+        this.timer = setTimeout(() => this.connect(baseUrl), RECONNECT_DELAY_MS);
       };
     } catch (e) {
-      console.info('Exception while connecting: "' + e + '", reconnecting in 1s');
-      if (this.onConnectionChanged)
-        this.onConnectionChanged(this, false, 'Exception while connecting: "' + e + '", trying to reconnect.');
-      this.timer = setTimeout(() => this.connect(baseUrl), 1000);
+      this.onConnectionChanged?.(this, false, 'Exception while connecting: "' + e + '", trying to reconnect.');
+      this.timer = setTimeout(() => this.connect(baseUrl), RECONNECT_DELAY_MS);
     }
   }
 
   public disconnect() {
     if (this.timer) clearTimeout(this.timer);
-    if (this.connection) {
-      // Ignore anything the old connection still delivers
-      this.connection.onmessage = () => {};
-      this.connection.onclose = () => {};
-      if (this.connection.readyState === WebSocket.OPEN) {
-        this.connection.close();
-      }
+    this.timer = null;
+    const connection = this.connection;
+    if (connection) {
+      // Detach first, so nothing the old connection still delivers, including
+      // a late onopen while it was connecting, affects the next one
+      connection.onopen = null;
+      connection.onmessage = null;
+      connection.onerror = null;
+      connection.onclose = null;
+      if (connection.readyState === WebSocket.CONNECTING || connection.readyState === WebSocket.OPEN)
+        connection.close();
+      this.connection = undefined;
     }
-    if (this.onConnectionChanged) this.onConnectionChanged(this, false);
+    this.onConnectionChanged?.(this, false);
   }
 
-  onChange: ((_this: SnapControl, _server: Snapcast.Server) => any) | null;
-  onConnectionChanged: ((_this: SnapControl, _connected: boolean, _error?: string) => any) | null;
-
-  private onNotification(notification: any): boolean {
-    let stream!: Snapcast.Stream;
+  private onNotification(notification: Notification) {
+    const params = notification.params;
     switch (notification.method) {
       case 'Client.OnVolumeChanged':
-        this.getClient(notification.params.id).config.volume = notification.params.volume;
-        // updateGroupVolume(this.getGroupFromClient(client.id));
-        return true;
+        this.getClient(params.id).config.volume = params.volume;
+        break;
       case 'Client.OnLatencyChanged':
-        this.getClient(notification.params.id).config.latency = notification.params.latency;
-        return false;
+        this.getClient(params.id).config.latency = params.latency;
+        break;
       case 'Client.OnNameChanged':
-        this.getClient(notification.params.id).config.name = notification.params.name;
-        return true;
+        this.getClient(params.id).config.name = params.name;
+        break;
       case 'Client.OnConnect':
       case 'Client.OnDisconnect':
-        this.getClient(notification.params.client.id).fromJson(notification.params.client);
-        return true;
+        this.getClient(params.client.id).fromJson(params.client);
+        break;
       case 'Group.OnMute':
-        this.getGroup(notification.params.id).muted = Boolean(notification.params.mute);
-        return true;
+        this.getGroup(params.id).muted = Boolean(params.mute);
+        break;
       case 'Group.OnStreamChanged':
-        this.getGroup(notification.params.id).stream_id = notification.params.stream_id;
-        return true;
+        this.getGroup(params.id).stream_id = params.stream_id;
+        break;
+      case 'Group.OnNameChanged':
+        this.getGroup(params.id).name = params.name;
+        break;
       case 'Stream.OnUpdate':
-        stream = this.getStream(notification.params.id);
-        stream.fromJson(notification.params.stream);
-        return true;
-      case 'Server.OnUpdate':
-        this.server.fromJson(notification.params.server);
-        return true;
+        this.getStream(params.id).fromJson(params.stream);
+        break;
       case 'Stream.OnProperties':
-        stream = this.getStream(notification.params.id);
-        stream.properties.fromJson(notification.params.properties);
-        return true;
-      default:
-        return false;
+        this.getStream(params.id).properties.fromJson(params.properties);
+        break;
+      case 'Server.OnUpdate':
+        this.server.fromJson(params.server);
+        break;
     }
   }
 
@@ -372,16 +437,9 @@ class SnapControl {
   }
 
   public getGroupVolume(group: Snapcast.Group, online: boolean): number {
-    if (group.clients.length === 0) return 0;
-    let group_vol: number = 0;
-    let client_count: number = 0;
-    for (const client of group.clients) {
-      if (online && !client.connected) continue;
-      group_vol += client.config.volume.percent;
-      ++client_count;
-    }
-    if (client_count === 0) return 0;
-    return group_vol / client_count;
+    const clients = group.clients.filter((client) => !online || client.connected);
+    if (clients.length === 0) return 0;
+    return clients.reduce((sum, client) => sum + client.config.volume.percent, 0) / clients.length;
   }
 
   public getGroupFromClient(client_id: string): Snapcast.Group {
@@ -394,16 +452,6 @@ class SnapControl {
     const group: Snapcast.Group = this.getGroupFromClient(client_id);
     return this.getStream(group.stream_id);
   }
-
-  // public getMyStreamId(): string {
-  //     try {
-  //         let group: Group = this.getGroupFromClient(SnapStream.getClientId());
-  //         return this.getStream(group.stream_id).id;
-  //     } catch (e) {
-  //         return "";
-  //     }
-  //     return "";
-  // }
 
   public getStream(stream_id: string): Snapcast.Stream {
     const stream = this.server.getStream(stream_id);
@@ -426,8 +474,7 @@ class SnapControl {
 
   public setClientName(client_id: string, name: string) {
     const client = this.getClient(client_id);
-    const current_name: string = client.config.name !== '' ? client.config.name : client.host.name;
-    if (name !== current_name) {
+    if (name !== client.getName()) {
       this.sendRequest('Client.SetName', { id: client_id, name: name });
       client.config.name = name;
     }
@@ -435,8 +482,7 @@ class SnapControl {
 
   public setClientLatency(client_id: string, latency: number) {
     const client = this.getClient(client_id);
-    const current_latency: number = client.config.latency;
-    if (latency !== current_latency) {
+    if (latency !== client.config.latency) {
       this.sendRequest('Client.SetLatency', { id: client_id, latency: latency });
       client.config.latency = latency;
     }
@@ -444,20 +490,8 @@ class SnapControl {
 
   public deleteClient(client_id: string) {
     this.sendRequest('Server.DeleteClient', { id: client_id });
-    this.server.groups.forEach((g: Snapcast.Group, gi: number) => {
-      g.clients.forEach((c: Snapcast.Client, ci: number) => {
-        if (c.id === client_id) {
-          this.server.groups[gi].clients.splice(ci, 1);
-        }
-      });
-    });
-
-    this.server.groups.forEach((g: Snapcast.Group, gi: number) => {
-      if (g.clients.length === 0) {
-        this.server.groups.splice(gi, 1);
-      }
-    });
-    // show();
+    for (const group of this.server.groups) group.clients = group.clients.filter((client) => client.id !== client_id);
+    this.server.groups = this.server.groups.filter((group) => group.clients.length > 0);
   }
 
   public setStream(group_id: string, stream_id: string) {
@@ -466,6 +500,7 @@ class SnapControl {
   }
 
   public setClients(group_id: string, clients: string[]) {
+    // The response carries the new server status
     this.status_req_id = this.sendRequest('Group.SetClients', { id: group_id, clients: clients });
   }
 
@@ -474,38 +509,30 @@ class SnapControl {
     this.sendRequest('Group.SetMute', { id: group_id, mute: mute });
   }
 
-  public control(stream_id: string, command: string, params?: any) {
-    const json: any = { id: stream_id, command: command };
-    if (params) {
-      json.params = params;
-    }
-    this.sendRequest('Stream.Control', json);
+  public control(stream_id: string, command: string, params?: Record<string, unknown>) {
+    this.sendRequest('Stream.Control', params ? { id: stream_id, command, params } : { id: stream_id, command });
   }
 
-  private sendRequest(method: string, params?: any): number {
-    const msg: any = {
-      id: ++this.msg_id,
-      jsonrpc: '2.0',
-      method: method,
-    };
-    if (params) msg.params = params;
-
-    const msgJson = JSON.stringify(msg);
-    console.debug('Sending: ' + msgJson);
-    this.connection.send(msgJson);
-    return this.msg_id;
+  // Returns the request id. While not connected nothing is sent; the next
+  // Server.GetStatus after reconnecting brings the model back in line.
+  private sendRequest(method: string, params?: Record<string, unknown>): number {
+    const id = ++this.msg_id;
+    if (this.connection?.readyState !== WebSocket.OPEN) {
+      console.warn('Not connected, dropping ' + method);
+      return id;
+    }
+    this.connection.send(
+      JSON.stringify(params ? { id, jsonrpc: '2.0', method, params } : { id, jsonrpc: '2.0', method }),
+    );
+    return id;
   }
 
   private onMessage(msg: string) {
-    let refresh: boolean = false;
     const json_msg = JSON.parse(msg);
-    const is_response: boolean = json_msg.id !== undefined;
-    // console.debug("Received " + (is_response ? "response" : "notification") + ", json: " + JSON.stringify(json_msg))
-    if (is_response) {
-      if (json_msg.id === this.status_req_id) {
-        this.server = new Snapcast.Server(json_msg.result.server);
-        refresh = true;
-      }
+    if (json_msg.id !== undefined) {
+      // Responses only matter when they carry the server status
+      if (json_msg.id !== this.status_req_id) return;
+      this.server = new Snapcast.Server(json_msg.result.server);
     } else {
       for (const notification of Array.isArray(json_msg) ? json_msg : [json_msg]) {
         try {
@@ -515,32 +542,11 @@ class SnapControl {
           console.warn('Failed to apply ' + notification.method + ': ' + e);
         }
       }
-      refresh = true;
-
-      // TODO: don't update everything, but only the changed,
-      // e.g. update the values for the volume sliders
-      // if (refresh)
-      //     show();
     }
-    if (refresh) {
-      if (this.onChange) {
-        console.debug('onChange');
-        this.onChange(this, this.server);
-      } else {
-        console.debug('no onChange');
-      }
-    }
+    this.onChange?.(this, this.server);
   }
-
-  // public onChange?: OnChange;
-  // public onStreamChange?: OnStreamChange;
-
-  connection!: WebSocket;
-  server: Snapcast.Server;
-  msg_id: number;
-  status_req_id: number;
-  timer: ReturnType<typeof setTimeout> | null;
 }
 
 export { SnapControl };
 export { Snapcast };
+export type { ClientJson, GroupJson, ServerJson, StreamJson };
