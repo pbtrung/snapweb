@@ -28,7 +28,7 @@ type GroupVolumeChange = {
 };
 
 export default function Group(props: GroupProps) {
-  const [update, setUpdate] = useState(0);
+  const [, setUpdate] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [clients, setClients] = useState<GroupClient[]>([]);
   const [streamId, setStreamId] = useState("");
@@ -37,6 +37,9 @@ export default function Group(props: GroupProps) {
 
   function getVolume(): number {
     const clients = getClients();
+    // Avoid a NaN volume for groups without (online) clients
+    if (clients.length === 0)
+      return 0;
     let volume = 0;
     for (const client of clients)
       volume += client.config.volume.percent;
@@ -104,7 +107,7 @@ export default function Group(props: GroupProps) {
       newDeletedClients.push(client);
     setDeletedClients(newDeletedClients);
     // dummy update, since the array was just mutated
-    setUpdate(update + 1);
+    setUpdate(u => u + 1);
   }
 
   function handleClientVolumeChange(client: Snapcast.Client) {
@@ -122,13 +125,13 @@ export default function Group(props: GroupProps) {
       newDeletedClients.splice(newDeletedClients.indexOf(client), 1);
 
     setDeletedClients(newDeletedClients);
-    setUpdate(update + 1);
+    setUpdate(u => u + 1);
   }
 
   function handleMuteClicked() {
     console.debug("handleMuteClicked");
     props.snapcontrol.muteGroup(props.group.id, !props.group.muted);
-    setUpdate(update + 1);
+    setUpdate(u => u + 1);
   }
 
   function handleVolumeChange(value: number) {
