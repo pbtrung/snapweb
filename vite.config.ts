@@ -4,11 +4,17 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // index.html lives in src/; public/, .env and dist/ stay at the top level
+  root: 'src',
+  publicDir: '../public',
+  envDir: '..',
   server: {
     host: '127.0.0.1',
   },
   base: './',
   build: {
+    outDir: '../dist',
+    emptyOutDir: true,
     rolldownOptions: {
       output: {
         // Keep the large vendor libraries in their own, separately cached chunks
