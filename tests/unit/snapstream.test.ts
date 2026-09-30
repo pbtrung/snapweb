@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AudioStream, HelloMessage, JsonMessage, SampleFormat, SnapStream, TimeMessage, TimeProvider, Tv } from '../../src/snapstream';
+import {
+  AudioStream,
+  HelloMessage,
+  JsonMessage,
+  SampleFormat,
+  SnapStream,
+  TimeMessage,
+  TimeProvider,
+  Tv,
+} from '../../src/snapstream';
 
 describe('Tv', () => {
   it('converts to and from milliseconds', () => {
@@ -87,8 +96,7 @@ describe('TimeProvider', () => {
     const provider = new TimeProvider();
     vi.spyOn(provider, 'now').mockReturnValue(1000);
     // offsets are (c2s - s2c) / 2
-    for (const offset of [2, 10, -5, 100, 3])
-      provider.setDiff(offset * 2, 0);
+    for (const offset of [2, 10, -5, 100, 3]) provider.setDiff(offset * 2, 0);
 
     // numeric order: -5, 2, 3, 10, 100 (string order would pick 100)
     expect(provider.diff).toBe(3);
@@ -98,8 +106,7 @@ describe('TimeProvider', () => {
   it('keeps only the last 100 offsets', () => {
     const provider = new TimeProvider();
     vi.spyOn(provider, 'now').mockReturnValue(1000);
-    for (let i = 0; i < 150; ++i)
-      provider.setDiff(i * 2, 0);
+    for (let i = 0; i < 150; ++i) provider.setDiff(i * 2, 0);
 
     expect(provider.diffBuffer).toHaveLength(100);
     expect(provider.diffBuffer[0]).toBe(50);

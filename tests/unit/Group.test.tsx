@@ -17,7 +17,9 @@ describe('Group', () => {
   });
 
   function renderGroup(id: string, showOffline = false) {
-    return render(<Group server={control.server} group={control.getGroup(id)} snapcontrol={control} showOffline={showOffline} />);
+    return render(
+      <Group server={control.server} group={control.getGroup(id)} snapcontrol={control} showOffline={showOffline} />,
+    );
   }
 
   // The first "Volume" slider is the group slider, the rest belong to clients
@@ -58,8 +60,11 @@ describe('Group', () => {
     fireEvent.change(groupSlider(), { target: { value: 30 } });
 
     // 30 is half of 60, so every client is halved
-    const sent = requests(ws, 'Client.SetVolume').map(m => [m.params.id, m.params.volume.percent]);
-    expect(sent).toEqual([['c1', 20], ['c2', 40]]);
+    const sent = requests(ws, 'Client.SetVolume').map((m) => [m.params.id, m.params.volume.percent]);
+    expect(sent).toEqual([
+      ['c1', 20],
+      ['c2', 40],
+    ]);
     expect(groupSlider()).toHaveValue('30');
   });
 
@@ -68,8 +73,11 @@ describe('Group', () => {
     fireEvent.change(groupSlider(), { target: { value: 80 } });
 
     // 80 is half way from 60 to 100, so every client moves half way to 100
-    const sent = requests(ws, 'Client.SetVolume').map(m => [m.params.id, m.params.volume.percent]);
-    expect(sent).toEqual([['c1', 70], ['c2', 90]]);
+    const sent = requests(ws, 'Client.SetVolume').map((m) => [m.params.id, m.params.volume.percent]);
+    expect(sent).toEqual([
+      ['c1', 70],
+      ['c2', 90],
+    ]);
     expect(groupSlider()).toHaveValue('80');
   });
 
@@ -77,13 +85,27 @@ describe('Group', () => {
     renderGroup('g1');
     // Give the slider a 100px track so pointer positions map 1:1 to values
     const root = groupSlider().closest('.MuiSlider-root') as HTMLElement;
-    root.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 10, right: 100, bottom: 10, x: 0, y: 0, toJSON: () => ({}) });
+    root.getBoundingClientRect = () => ({
+      left: 0,
+      width: 100,
+      top: 0,
+      height: 10,
+      right: 100,
+      bottom: 10,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
     fireEvent.pointerDown(root, { clientX: 30, button: 0 });
     fireEvent.pointerMove(document, { clientX: 60, buttons: 1 });
     fireEvent.pointerUp(document, { clientX: 60 });
 
     // Returning to the start value restores the original client volumes
-    expect(requests(ws, 'Client.SetVolume').slice(-2).map(m => m.params.volume.percent)).toEqual([40, 80]);
+    expect(
+      requests(ws, 'Client.SetVolume')
+        .slice(-2)
+        .map((m) => m.params.volume.percent),
+    ).toEqual([40, 80]);
   });
 
   it('follows client volume changes', () => {
@@ -118,7 +140,9 @@ describe('Group', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'Active stream' }));
     await userEvent.click(screen.getByRole('option', { name: 's2' }));
 
-    expect(requests(ws, 'Group.SetStream')).toEqual([expect.objectContaining({ params: { id: 'g1', stream_id: 's2' } })]);
+    expect(requests(ws, 'Group.SetStream')).toEqual([
+      expect.objectContaining({ params: { id: 'g1', stream_id: 's2' } }),
+    ]);
   });
 
   describe('playback controls', () => {
@@ -138,7 +162,7 @@ describe('Group', () => {
       await userEvent.click(screen.getByRole('button', { name: 'next' }));
       await userEvent.click(screen.getByRole('button', { name: 'previous' }));
 
-      expect(requests(ws, 'Stream.Control').map(m => m.params)).toEqual([
+      expect(requests(ws, 'Stream.Control').map((m) => m.params)).toEqual([
         { id: 's1', command: 'pause' },
         { id: 's1', command: 'next' },
         { id: 's1', command: 'previous' },
@@ -179,7 +203,9 @@ describe('Group', () => {
       expect(within(dialog).getByRole('checkbox', { name: 'livingroom' })).not.toBeChecked();
 
       await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
-      expect(requests(ws, 'Group.SetClients')).toEqual([expect.objectContaining({ params: { id: 'g1', clients: ['c1', 'c3'] } })]);
+      expect(requests(ws, 'Group.SetClients')).toEqual([
+        expect.objectContaining({ params: { id: 'g1', clients: ['c1', 'c3'] } }),
+      ]);
       expect(requests(ws, 'Group.SetStream')).toHaveLength(0);
     });
 
@@ -198,7 +224,9 @@ describe('Group', () => {
       await userEvent.click(screen.getByRole('option', { name: 's2' }));
       await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
 
-      expect(requests(ws, 'Group.SetStream')).toEqual([expect.objectContaining({ params: { id: 'g1', stream_id: 's2' } })]);
+      expect(requests(ws, 'Group.SetStream')).toEqual([
+        expect.objectContaining({ params: { id: 'g1', stream_id: 's2' } }),
+      ]);
     });
 
     it('discards changes on Cancel', async () => {
@@ -243,7 +271,7 @@ describe('Group', () => {
     it('deletes the client when the snackbar times out', async () => {
       await deleteOffline();
       // Snackbar autoHideDuration is 6 seconds
-      await act(() => new Promise(resolve => setTimeout(resolve, 6100)));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 6100)));
 
       expect(requests(ws, 'Server.DeleteClient')).toEqual([expect.objectContaining({ params: { id: 'c3' } })]);
     }, 10000);

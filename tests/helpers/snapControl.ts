@@ -18,10 +18,9 @@ export function connectedControl(status = makeServerStatus()) {
 
 // Only the requests with the given JSON-RPC method
 export function requests(ws: FakeWebSocket, method: string): any[] {
-  return ws.sent.filter(m => m.method === method);
+  return ws.sent.filter((m) => m.method === method);
 }
 
 export function quietConsole() {
-  for (const level of ['debug', 'log', 'info'] as const)
-    vi.spyOn(console, level).mockImplementation(() => { });
+  for (const level of ['debug', 'log', 'info'] as const) vi.spyOn(console, level).mockImplementation(() => {});
 }

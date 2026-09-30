@@ -6,7 +6,7 @@ import AboutDialog from '../../src/components/AboutDialog';
 describe('AboutDialog', () => {
   it('shows the version and closes', async () => {
     // The dialog nests a <table> inside a <p>, which React warns about
-    vi.spyOn(console, 'error').mockImplementation(() => { });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const onClose = vi.fn();
     render(<AboutDialog open onClose={onClose} />);
 

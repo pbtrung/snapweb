@@ -10,7 +10,7 @@ describe('SettingsDialog', () => {
     config.baseUrl = 'ws://old:1780';
     config.theme = Theme.Light;
     config.showOffline = false;
-    vi.spyOn(console, 'log').mockImplementation(() => { });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   it('shows the current settings', () => {

@@ -1,15 +1,15 @@
 const host = import.meta.env.VITE_APP_SNAPSERVER_HOST || window.location.host;
 
 const keys = {
-  snapserver_host: "snapserver.host",
-  theme: "theme",
-  showoffline: "showoffline"
-}
+  snapserver_host: 'snapserver.host',
+  theme: 'theme',
+  showoffline: 'showoffline',
+};
 
 enum Theme {
-  System = "system",
-  Light = "light",
-  Dark = "dark",
+  System = 'system',
+  Light = 'light',
+  Dark = 'dark',
 }
 
 function setPersistentValue(key: string, value: string) {
@@ -18,7 +18,7 @@ function setPersistentValue(key: string, value: string) {
   }
 }
 
-function getPersistentValue(key: string, defaultValue: string = ""): string {
+function getPersistentValue(key: string, defaultValue: string = ''): string {
   if (window.localStorage) {
     const value = window.localStorage.getItem(key);
     if (value !== null) {
@@ -40,19 +40,23 @@ function uuidv4(): string {
     }
   }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    const r = Math.random() * 16 | 0, v = c === 'x' ? r : ((r & 0x3) | 0x8);
+    const r = (Math.random() * 16) | 0,
+      v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
 }
 
 // The id this browser registers with on the audio stream, created once
 function getClientId(): string {
-  return getPersistentValue("uniqueId", uuidv4());
+  return getPersistentValue('uniqueId', uuidv4());
 }
 
 const config = {
   get baseUrl() {
-    return getPersistentValue(keys.snapserver_host, (window.location.protocol === "https:" ? "wss://" : "ws://") + host);
+    return getPersistentValue(
+      keys.snapserver_host,
+      (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + host,
+    );
   },
   set baseUrl(value) {
     setPersistentValue(keys.snapserver_host, value);
@@ -68,8 +72,7 @@ const config = {
   },
   set showOffline(value: boolean) {
     setPersistentValue(keys.showoffline, String(value));
-  }
+  },
 };
-
 
 export { config, getClientId, getPersistentValue, setPersistentValue, Theme };

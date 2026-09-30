@@ -63,12 +63,18 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
           const seen = observer.getClient(client.id).config.volume;
           return seen.percent === percent && seen.muted === !original.muted;
         }, 'Client.OnVolumeChanged');
-        expect((await fetchStatus()).getClient(client.id)!.config.volume).toEqual({ muted: !original.muted, percent: percent });
+        expect((await fetchStatus()).getClient(client.id)!.config.volume).toEqual({
+          muted: !original.muted,
+          percent: percent,
+        });
       } finally {
         actor.setVolume(client.id, original.percent, original.muted);
       }
 
-      await waitFor(() => observer.getClient(client.id).config.volume.percent === original.percent, 'the volume to be restored');
+      await waitFor(
+        () => observer.getClient(client.id).config.volume.percent === original.percent,
+        'the volume to be restored',
+      );
       expect((await fetchStatus()).getClient(client.id)!.config.volume).toEqual(original);
     });
 
@@ -129,11 +135,10 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
     });
 
     it('switches the stream and restores it', async (context) => {
-      if (actor.server.streams.length < 2)
-        context.skip('needs a server with at least two streams');
+      if (actor.server.streams.length < 2) context.skip('needs a server with at least two streams');
       const group = pickGroup(actor.server);
       const original = group.stream_id;
-      const other = actor.server.streams.find(stream => stream.id !== original)!.id;
+      const other = actor.server.streams.find((stream) => stream.id !== original)!.id;
 
       try {
         actor.setStream(group.id, other);
@@ -151,7 +156,9 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
     it('reports connect and disconnect', async () => {
       const control = new SnapControl();
       const states: boolean[] = [];
-      control.onConnectionChanged = (_control, connected) => { states.push(connected); };
+      control.onConnectionChanged = (_control, connected) => {
+        states.push(connected);
+      };
       control.connect(serverUrl);
       await waitFor(() => states.includes(true), 'the connection');
       control.disconnect();
@@ -160,8 +167,12 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
     });
 
     it('keeps every client when reloading the status', async () => {
-      const before = allClients(actor.server).map(client => client.id).sort();
-      const after = allClients(await fetchStatus()).map(client => client.id).sort();
+      const before = allClients(actor.server)
+        .map((client) => client.id)
+        .sort();
+      const after = allClients(await fetchStatus())
+        .map((client) => client.id)
+        .sort();
       expect(after).toEqual(before);
     });
   });

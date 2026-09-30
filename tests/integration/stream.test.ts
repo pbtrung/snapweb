@@ -19,7 +19,7 @@ describe.skipIf(!serverUrl)('audio stream handshake', () => {
     const status = await waitFor(async () => {
       const server = await fetchStatus();
       const client = server.getClient(clientId);
-      return (client === null || !client.connected) ? server : undefined;
+      return client === null || !client.connected ? server : undefined;
     }, 'the test client to disconnect');
     if (status.getClient(clientId)) {
       const control = await connect();
@@ -52,14 +52,17 @@ describe.skipIf(!serverUrl)('audio stream handshake', () => {
     socket.send(hello.serialize());
 
     // 3 = ServerSettings, 1 = CodecHeader
-    const settings = await waitFor(() => received.find(m => m.type === 3), 'ServerSettings');
-    await waitFor(() => received.find(m => m.type === 1), 'CodecHeader');
+    const settings = await waitFor(() => received.find((m) => m.type === 3), 'ServerSettings');
+    await waitFor(() => received.find((m) => m.type === 1), 'CodecHeader');
     const json = new JsonMessage(settings.buffer).json;
     expect(json).toHaveProperty('bufferMs');
     expect(json).toHaveProperty('volume');
 
     // The host name only survives if the message size counted UTF-8 bytes
-    const loaded = await waitFor(async () => (await fetchStatus()).getClient(clientId) ?? undefined, 'the test client in the status');
+    const loaded = await waitFor(
+      async () => (await fetchStatus()).getClient(clientId) ?? undefined,
+      'the test client in the status',
+    );
     expect(loaded.host.name).toBe(hostName);
     expect(loaded.connected).toBe(true);
     expect(loaded.snapclient.name).toBe('Snapweb');
@@ -72,7 +75,10 @@ describe.skipIf(!serverUrl)('audio stream handshake', () => {
     request.latency.setMilliseconds(performance.now());
     socket!.send(request.serialize());
 
-    const reply = await waitFor(() => received.find(m => m.type === 4 && new TimeMessage(m.buffer).refersTo === 4242), 'the time reply');
+    const reply = await waitFor(
+      () => received.find((m) => m.type === 4 && new TimeMessage(m.buffer).refersTo === 4242),
+      'the time reply',
+    );
     const time = new TimeMessage(reply.buffer);
     // The server stamps received on arrival and sent when replying
     expect(time.sent.getMilliseconds()).toBeGreaterThanOrEqual(time.received.getMilliseconds());

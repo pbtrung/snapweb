@@ -41,11 +41,11 @@ describe('SnapWeb', () => {
       media: query,
       addEventListener: (_: string, l: MediaQueryListener) => listeners.add(l),
       removeEventListener: (_: string, l: MediaQueryListener) => listeners.delete(l),
-      addListener: () => { },
-      removeListener: () => { },
+      addListener: () => {},
+      removeListener: () => {},
     }));
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
-    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => { });
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -53,7 +53,7 @@ describe('SnapWeb', () => {
   });
 
   function socket(url = 'ws://snapserver:1780/jsonrpc') {
-    return FakeWebSocket.instances.filter(ws => ws.url === url).slice(-1)[0];
+    return FakeWebSocket.instances.filter((ws) => ws.url === url).slice(-1)[0];
   }
 
   function connect(ws = socket()) {
@@ -95,7 +95,9 @@ describe('SnapWeb', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Connection lost, trying to reconnect.');
     expect(screen.queryByText('Kitchen')).not.toBeInTheDocument();
 
-    act(() => { vi.advanceTimersByTime(1000); });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
     connect(FakeWebSocket.latest());
     expect(screen.getByText('Kitchen')).toBeInTheDocument();
   });
@@ -138,7 +140,7 @@ describe('SnapWeb', () => {
   });
 
   it('opens the about dialog from the menu', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => { });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     render(<SnapWeb />);
     await openFromMenu('About...');
     expect(screen.getByRole('dialog', { name: 'About Snapweb' })).toBeInTheDocument();
@@ -162,20 +164,33 @@ describe('SnapWeb', () => {
 
     beforeEach(() => {
       session = { metadata: null, playbackState: 'none', handlers: new Map(), position: null };
-      vi.stubGlobal('MediaMetadata', class {
-        constructor(init: object) {
-          Object.assign(this, init);
-        }
-      });
+      vi.stubGlobal(
+        'MediaMetadata',
+        class {
+          constructor(init: object) {
+            Object.assign(this, init);
+          }
+        },
+      );
       Object.defineProperty(navigator, 'mediaSession', {
         configurable: true,
         value: {
-          set metadata(value: unknown) { session.metadata = value; },
-          get metadata() { return session.metadata; },
-          set playbackState(value: string) { session.playbackState = value; },
-          get playbackState() { return session.playbackState; },
+          set metadata(value: unknown) {
+            session.metadata = value;
+          },
+          get metadata() {
+            return session.metadata;
+          },
+          set playbackState(value: string) {
+            session.playbackState = value;
+          },
+          get playbackState() {
+            return session.playbackState;
+          },
           setActionHandler: (action: string, handler: unknown) => session.handlers.set(action, handler),
-          setPositionState: (state: unknown) => { session.position = state; },
+          setPositionState: (state: unknown) => {
+            session.position = state;
+          },
         },
       });
     });
@@ -227,7 +242,7 @@ describe('SnapWeb', () => {
       session.handlers.get('nexttrack')();
       session.handlers.get('stop')();
 
-      expect(ws.sent.map(m => m.params.command)).toEqual(['pause', 'next', 'stop']);
+      expect(ws.sent.map((m) => m.params.command)).toEqual(['pause', 'next', 'stop']);
     });
 
     it('seeks when the stream supports it', async () => {
@@ -249,7 +264,7 @@ describe('SnapWeb', () => {
       session.handlers.get('seekforward')({ seekOffset: 5 });
       session.handlers.get('seekto')({ seekTime: 42 });
 
-      expect(ws.sent.map(m => m.params)).toEqual([
+      expect(ws.sent.map((m) => m.params)).toEqual([
         { id: 's1', command: 'seek', params: { offset: -10 } },
         { id: 's1', command: 'seek', params: { offset: 5 } },
         { id: 's1', command: 'setPosition', params: { position: 42 } },
@@ -259,7 +274,13 @@ describe('SnapWeb', () => {
 
     it('pauses the keep-alive audio when the stream pauses', async () => {
       const ws = await startPlayback();
-      act(() => ws.receive({ jsonrpc: '2.0', method: 'Stream.OnProperties', params: { id: 's1', properties: { playbackStatus: 'paused', canPlay: true } } }));
+      act(() =>
+        ws.receive({
+          jsonrpc: '2.0',
+          method: 'Stream.OnProperties',
+          params: { id: 's1', properties: { playbackStatus: 'paused', canPlay: true } },
+        }),
+      );
 
       expect(session.playbackState).toBe('paused');
       expect(session.metadata.title).toBe('Unknown Title');
@@ -275,12 +296,18 @@ describe('SnapWeb', () => {
 
   it('does not start the stream when stopped before the audio code loaded', async () => {
     let resolvePlay!: () => void;
-    vi.mocked(HTMLMediaElement.prototype.play).mockReturnValue(new Promise<void>(resolve => { resolvePlay = resolve; }));
+    vi.mocked(HTMLMediaElement.prototype.play).mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolvePlay = resolve;
+      }),
+    );
     render(<SnapWeb />);
     connect();
     await userEvent.click(screen.getByTestId('PlayArrowIcon').closest('button')!);
     await userEvent.click(screen.getByTestId('StopIcon').closest('button')!);
-    await act(async () => { resolvePlay(); });
+    await act(async () => {
+      resolvePlay();
+    });
 
     expect(snapStream.created).toEqual([]);
   });

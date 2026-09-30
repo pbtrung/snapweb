@@ -1,0 +1,7 @@
+dist
+coverage
+package-lock.json
+# Local Claude Code settings
+.claude
+# Keep hand-written docs and the changelog as they are
+*.md

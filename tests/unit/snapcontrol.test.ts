@@ -7,8 +7,8 @@ describe('Snapcast model', () => {
   it('parses a full server status', () => {
     const server = new Snapcast.Server(makeServerStatus());
 
-    expect(server.groups.map(g => g.id)).toEqual(['g1', 'g2']);
-    expect(server.streams.map(s => s.id)).toEqual(['s1', 's2']);
+    expect(server.groups.map((g) => g.id)).toEqual(['g1', 'g2']);
+    expect(server.streams.map((s) => s.id)).toEqual(['s1', 's2']);
     expect(server.server.snapserver.version).toBe('0.30.0');
     expect(server.server.host.name).toBe('snapserver');
 
@@ -38,7 +38,9 @@ describe('Snapcast model', () => {
   });
 
   it('parses client details', () => {
-    const client = new Snapcast.Client(makeClient('x', { name: 'Named', latency: 25, muted: true, percent: 33, connected: false }));
+    const client = new Snapcast.Client(
+      makeClient('x', { name: 'Named', latency: 25, muted: true, percent: 33, connected: false }),
+    );
 
     expect(client.config).toEqual({ instance: 1, latency: 25, name: 'Named', volume: { muted: true, percent: 33 } });
     expect(client.connected).toBe(false);
@@ -102,9 +104,9 @@ describe('SnapControl', () => {
   beforeEach(() => {
     FakeWebSocket.reset();
     vi.stubGlobal('WebSocket', FakeWebSocket);
-    vi.spyOn(console, 'debug').mockImplementation(() => { });
-    vi.spyOn(console, 'info').mockImplementation(() => { });
-    vi.spyOn(console, 'error').mockImplementation(() => { });
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     control = new SnapControl();
     onChange = vi.fn<NonNullable<SnapControl['onChange']>>();
     onConnectionChanged = vi.fn<NonNullable<SnapControl['onConnectionChanged']>>();
@@ -162,15 +164,22 @@ describe('SnapControl', () => {
     it('retries when the WebSocket constructor throws', () => {
       vi.useFakeTimers();
       let attempts = 0;
-      vi.stubGlobal('WebSocket', class {
-        constructor() {
-          attempts++;
-          throw new Error('bad url');
-        }
-      });
+      vi.stubGlobal(
+        'WebSocket',
+        class {
+          constructor() {
+            attempts++;
+            throw new Error('bad url');
+          }
+        },
+      );
       control.connect('nonsense');
 
-      expect(onConnectionChanged).toHaveBeenLastCalledWith(control, false, 'Exception while connecting: "Error: bad url", trying to reconnect.');
+      expect(onConnectionChanged).toHaveBeenLastCalledWith(
+        control,
+        false,
+        'Exception while connecting: "Error: bad url", trying to reconnect.',
+      );
       vi.advanceTimersByTime(1000);
       expect(attempts).toBe(2);
     });
@@ -201,7 +210,9 @@ describe('SnapControl', () => {
   });
 
   describe('lookups', () => {
-    beforeEach(() => { connected(); });
+    beforeEach(() => {
+      connected();
+    });
 
     it('finds clients, groups and streams or throws', () => {
       expect(control.getClient('c1').getName()).toBe('Kitchen');
@@ -234,11 +245,17 @@ describe('SnapControl', () => {
 
   describe('requests', () => {
     let ws: FakeWebSocket;
-    beforeEach(() => { ws = connected(); });
+    beforeEach(() => {
+      ws = connected();
+    });
 
     it('sets and clamps client volume', () => {
       control.setVolume('c1', 55);
-      expect(ws.lastSent()).toMatchObject({ jsonrpc: '2.0', method: 'Client.SetVolume', params: { id: 'c1', volume: { muted: false, percent: 55 } } });
+      expect(ws.lastSent()).toMatchObject({
+        jsonrpc: '2.0',
+        method: 'Client.SetVolume',
+        params: { id: 'c1', volume: { muted: false, percent: 55 } },
+      });
       expect(control.getClient('c1').config.volume.percent).toBe(55);
 
       control.setVolume('c1', 150, true);
@@ -251,7 +268,7 @@ describe('SnapControl', () => {
     it('uses increasing request ids', () => {
       control.setVolume('c1', 1);
       control.setVolume('c1', 2);
-      const ids = ws.sent.map(m => m.id);
+      const ids = ws.sent.map((m) => m.id);
       expect(ids).toEqual([...ids].sort((a, b) => a - b));
       expect(new Set(ids).size).toBe(ids.length);
     });
@@ -278,10 +295,10 @@ describe('SnapControl', () => {
     it('deletes a client and drops its group once empty', () => {
       control.deleteClient('c2');
       expect(ws.lastSent()).toMatchObject({ method: 'Server.DeleteClient', params: { id: 'c2' } });
-      expect(control.getGroup('g1').clients.map(c => c.id)).toEqual(['c1']);
+      expect(control.getGroup('g1').clients.map((c) => c.id)).toEqual(['c1']);
 
       control.deleteClient('c3');
-      expect(control.server.groups.map(g => g.id)).toEqual(['g1']);
+      expect(control.server.groups.map((g) => g.id)).toEqual(['g1']);
     });
 
     it('sets a group stream', () => {
@@ -322,7 +339,9 @@ describe('SnapControl', () => {
 
   describe('notifications', () => {
     let ws: FakeWebSocket;
-    beforeEach(() => { ws = connected(); });
+    beforeEach(() => {
+      ws = connected();
+    });
 
     function notify(method: string, params: unknown) {
       ws.receive({ jsonrpc: '2.0', method: method, params: params });
@@ -365,7 +384,10 @@ describe('SnapControl', () => {
       notify('Stream.OnUpdate', { id: 's2', stream: updated });
       expect(control.getStream('s2').properties.canControl).toBe(true);
 
-      notify('Stream.OnProperties', { id: 's2', properties: { playbackStatus: 'playing', metadata: { title: 'New' } } });
+      notify('Stream.OnProperties', {
+        id: 's2',
+        properties: { playbackStatus: 'playing', metadata: { title: 'New' } },
+      });
       expect(control.getStream('s2').properties.playbackStatus).toBe('playing');
       expect(control.getStream('s2').properties.metadata!.title).toBe('New');
     });
@@ -393,7 +415,7 @@ describe('SnapControl', () => {
     });
 
     it('skips notifications for unknown clients and applies the rest', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       ws.receive([
         { jsonrpc: '2.0', method: 'Client.OnDisconnect', params: { id: 'gone', client: makeClient('gone') } },
         { jsonrpc: '2.0', method: 'Group.OnMute', params: { id: 'g1', mute: true } },

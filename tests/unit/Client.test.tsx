@@ -18,7 +18,14 @@ describe('Client', () => {
   function renderClient(id: string, handlers: { onDelete?: () => void; onVolumeChange?: () => void } = {}) {
     const onDelete = handlers.onDelete ?? vi.fn();
     const onVolumeChange = handlers.onVolumeChange ?? vi.fn();
-    const result = render(<Client client={control.getClient(id)} snapcontrol={control} onDelete={onDelete} onVolumeChange={onVolumeChange} />);
+    const result = render(
+      <Client
+        client={control.getClient(id)}
+        snapcontrol={control}
+        onDelete={onDelete}
+        onVolumeChange={onVolumeChange}
+      />,
+    );
     return { ...result, onDelete, onVolumeChange };
   }
 
@@ -114,7 +121,9 @@ describe('Client', () => {
       expect(requests(ws, 'Client.SetName')).toHaveLength(0);
 
       await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
-      expect(requests(ws, 'Client.SetName')).toEqual([expect.objectContaining({ params: { id: 'c1', name: 'Dining' } })]);
+      expect(requests(ws, 'Client.SetName')).toEqual([
+        expect.objectContaining({ params: { id: 'c1', name: 'Dining' } }),
+      ]);
       expect(screen.getByText('Dining')).toBeInTheDocument();
     });
 

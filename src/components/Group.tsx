@@ -3,10 +3,37 @@ import { useState } from 'react';
 import Client from './Client';
 import logo from '../assets/logo192.png';
 import { SnapControl, Snapcast } from '../snapcontrol';
-import { Alert, Box, Button, Card, CardMedia, Checkbox, Divider, FormControl, FormControlLabel, FormGroup, Grid, MenuItem, Select, Slider, Snackbar, Stack, TextField, Typography, IconButton } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardMedia,
+  Checkbox,
+  Divider,
+  FormControl,
+  FormControlLabel,
+  FormGroup,
+  Grid,
+  MenuItem,
+  Select,
+  Slider,
+  Snackbar,
+  Stack,
+  TextField,
+  Typography,
+  IconButton,
+} from '@mui/material';
 import { Dialog, DialogActions, DialogContent, DialogTitle } from '@mui/material';
-import { VolumeUp as VolumeUpIcon, VolumeOff as VolumeOffIcon, PlayArrow as PlayArrowIcon, Pause as PauseIcon, SkipPrevious as SkipPreviousIcon, SkipNext as SkipNextIcon, Settings as SettingsIcon } from '@mui/icons-material';
-
+import {
+  VolumeUp as VolumeUpIcon,
+  VolumeOff as VolumeOffIcon,
+  PlayArrow as PlayArrowIcon,
+  Pause as PauseIcon,
+  SkipPrevious as SkipPreviousIcon,
+  SkipNext as SkipNextIcon,
+  Settings as SettingsIcon,
+} from '@mui/icons-material';
 
 type GroupClient = {
   client: Snapcast.Client;
@@ -15,7 +42,7 @@ type GroupClient = {
 };
 
 type GroupProps = {
-  server: Snapcast.Server
+  server: Snapcast.Server;
   group: Snapcast.Group;
   snapcontrol: SnapControl;
   showOffline: boolean;
@@ -31,29 +58,31 @@ export default function Group(props: GroupProps) {
   const [, setUpdate] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [clients, setClients] = useState<GroupClient[]>([]);
-  const [streamId, setStreamId] = useState("");
+  const [streamId, setStreamId] = useState('');
   const [deletedClients, setDeletedClients] = useState<Snapcast.Client[]>([]);
-  const groupVolumeChange = useRef<GroupVolumeChange>({ volumeEntered: true, client_volumes: new Map<string, number>(), group_volume: 0 });
+  const groupVolumeChange = useRef<GroupVolumeChange>({
+    volumeEntered: true,
+    client_volumes: new Map<string, number>(),
+    group_volume: 0,
+  });
 
   function getVolume(): number {
     const clients = getClients();
     // Avoid a NaN volume for groups without (online) clients
-    if (clients.length === 0)
-      return 0;
+    if (clients.length === 0) return 0;
     let volume = 0;
-    for (const client of clients)
-      volume += client.config.volume.percent;
+    for (const client of clients) volume += client.config.volume.percent;
     return volume / clients.length;
   }
 
   // The client volumes live in the mutable server model, so force a re-render
   // to pick up the new group volume
   function updateVolume() {
-    setUpdate(u => u + 1);
+    setUpdate((u) => u + 1);
   }
 
   function handleSettingsClicked(_event: React.MouseEvent<HTMLButtonElement>) {
-    console.debug("handleSettingsClicked");
+    console.debug('handleSettingsClicked');
 
     const clients: GroupClient[] = [];
     for (const group of props.server.groups) {
@@ -67,11 +96,11 @@ export default function Group(props: GroupProps) {
     // props.server.groups.map(group => group.clients.map(client => this.clients.push(client.id)));
     setSettingsOpen(true);
     setClients(clients);
-    setStreamId(props.group.stream_id)
+    setStreamId(props.group.stream_id);
   }
 
   function handleSettingsClose(apply: boolean) {
-    console.debug("handleSettingsClose: " + apply);
+    console.debug('handleSettingsClose: ' + apply);
     if (apply) {
       let changed: boolean = false;
       for (const element of clients) {
@@ -83,59 +112,53 @@ export default function Group(props: GroupProps) {
 
       if (changed) {
         const groupClients: string[] = [];
-        for (const element of clients)
-          if (element.inGroup)
-            groupClients.push(element.client.id);
+        for (const element of clients) if (element.inGroup) groupClients.push(element.client.id);
         props.snapcontrol.setClients(props.group.id, groupClients);
       }
 
-      if (props.group.stream_id !== streamId)
-        props.snapcontrol.setStream(props.group.id, streamId);
+      if (props.group.stream_id !== streamId) props.snapcontrol.setStream(props.group.id, streamId);
     }
     setSettingsOpen(false);
   }
 
   function handleGroupClientChange(client: Snapcast.Client, inGroup: boolean) {
-    console.debug("handleGroupClientChange: " + client.id + ", in group: " + inGroup);
-    setClients(clients.map(element => element.client === client ? { ...element, inGroup: inGroup } : element));
+    console.debug('handleGroupClientChange: ' + client.id + ', in group: ' + inGroup);
+    setClients(clients.map((element) => (element.client === client ? { ...element, inGroup: inGroup } : element)));
   }
 
   function handleClientDelete(client: Snapcast.Client) {
-    console.debug("handleClientDelete: " + client.getName());
+    console.debug('handleClientDelete: ' + client.getName());
     const newDeletedClients = deletedClients;
-    if (!newDeletedClients.includes(client))
-      newDeletedClients.push(client);
+    if (!newDeletedClients.includes(client)) newDeletedClients.push(client);
     setDeletedClients(newDeletedClients);
     // dummy update, since the array was just mutated
-    setUpdate(u => u + 1);
+    setUpdate((u) => u + 1);
   }
 
   function handleClientVolumeChange(client: Snapcast.Client) {
-    console.debug("handleClientVolumeChange: " + client.getName());
+    console.debug('handleClientVolumeChange: ' + client.getName());
     updateVolume();
   }
 
   function handleSnackbarClose(client: Snapcast.Client, undo: boolean) {
-    console.debug("handleSnackbarClose, client: " + client.getName() + ", undo: " + undo);
-    if (!undo)
-      props.snapcontrol.deleteClient(client.id);
+    console.debug('handleSnackbarClose, client: ' + client.getName() + ', undo: ' + undo);
+    if (!undo) props.snapcontrol.deleteClient(client.id);
 
     const newDeletedClients = deletedClients;
-    if (newDeletedClients.includes(client))
-      newDeletedClients.splice(newDeletedClients.indexOf(client), 1);
+    if (newDeletedClients.includes(client)) newDeletedClients.splice(newDeletedClients.indexOf(client), 1);
 
     setDeletedClients(newDeletedClients);
-    setUpdate(u => u + 1);
+    setUpdate((u) => u + 1);
   }
 
   function handleMuteClicked() {
-    console.debug("handleMuteClicked");
+    console.debug('handleMuteClicked');
     props.snapcontrol.muteGroup(props.group.id, !props.group.muted);
-    setUpdate(u => u + 1);
+    setUpdate((u) => u + 1);
   }
 
   function handleVolumeChange(value: number) {
-    console.debug("handleVolumeChange: " + value);
+    console.debug('handleVolumeChange: ' + value);
     if (groupVolumeChange.current.volumeEntered) {
       groupVolumeChange.current.client_volumes.clear();
       groupVolumeChange.current.group_volume = 0;
@@ -149,17 +172,13 @@ export default function Group(props: GroupProps) {
 
     const delta = value - groupVolumeChange.current.group_volume;
     let ratio: number;
-    if (delta < 0)
-      ratio = (groupVolumeChange.current.group_volume - value) / groupVolumeChange.current.group_volume;
-    else
-      ratio = (value - groupVolumeChange.current.group_volume) / (100 - groupVolumeChange.current.group_volume);
+    if (delta < 0) ratio = (groupVolumeChange.current.group_volume - value) / groupVolumeChange.current.group_volume;
+    else ratio = (value - groupVolumeChange.current.group_volume) / (100 - groupVolumeChange.current.group_volume);
 
     for (const client of getClients()) {
       let new_volume = groupVolumeChange.current.client_volumes.get(client.id)!;
-      if (delta < 0)
-        new_volume -= ratio * new_volume;
-      else
-        new_volume += ratio * (100 - new_volume);
+      if (delta < 0) new_volume -= ratio * new_volume;
+      else new_volume += ratio * (100 - new_volume);
 
       client.config.volume.percent = new_volume;
       props.snapcontrol.setVolume(client.id, new_volume);
@@ -169,38 +188,50 @@ export default function Group(props: GroupProps) {
   }
 
   function handleVolumeChangeCommitted(value: number) {
-    console.debug("handleVolumeChangeCommitted: " + value);
+    console.debug('handleVolumeChangeCommitted: ' + value);
     groupVolumeChange.current.volumeEntered = true;
   }
 
   function handlePlayPauseClicked() {
-    if (props.server.getStream(props.group.stream_id)?.properties.playbackStatus === "playing")
+    if (props.server.getStream(props.group.stream_id)?.properties.playbackStatus === 'playing')
       props.snapcontrol.control(props.group.stream_id, 'pause');
-    else
-      props.snapcontrol.control(props.group.stream_id, 'play');
+    else props.snapcontrol.control(props.group.stream_id, 'play');
   }
 
   function snackbar() {
-    return (
-      deletedClients.map(client =>
-        <Snackbar
-          open
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-          autoHideDuration={6000}
-          key={'snackbar-' + client.id}
-          onClose={(_, reason: string) => { if (reason !== 'clickaway') handleSnackbarClose(client, false) }}>
-          <Alert onClose={(_) => { handleSnackbarClose(client, false) }} severity="info" sx={{ width: '100%' }}
-            action={
-              <Button color="inherit" size="small" onClick={(_) => { handleSnackbarClose(client, true) }}>
-                Undo
-              </Button>}
-          >
-            Deleted {client.getName()}
-          </Alert>
-        </Snackbar >)
-    )
+    return deletedClients.map((client) => (
+      <Snackbar
+        open
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        autoHideDuration={6000}
+        key={'snackbar-' + client.id}
+        onClose={(_, reason: string) => {
+          if (reason !== 'clickaway') handleSnackbarClose(client, false);
+        }}
+      >
+        <Alert
+          onClose={(_) => {
+            handleSnackbarClose(client, false);
+          }}
+          severity="info"
+          sx={{ width: '100%' }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={(_) => {
+                handleSnackbarClose(client, true);
+              }}
+            >
+              Undo
+            </Button>
+          }
+        >
+          Deleted {client.getName()}
+        </Alert>
+      </Snackbar>
+    ));
   }
-
 
   function getClients(): Snapcast.Client[] {
     const clients = [];
@@ -216,39 +247,53 @@ export default function Group(props: GroupProps) {
   const groupClients = [];
 
   for (const client of getClients()) {
-    groupClients.push(<Client key={client.id} client={client} snapcontrol={props.snapcontrol} onDelete={() => { handleClientDelete(client) }} onVolumeChange={() => { handleClientVolumeChange(client) }} />);
+    groupClients.push(
+      <Client
+        key={client.id}
+        client={client}
+        snapcontrol={props.snapcontrol}
+        onDelete={() => {
+          handleClientDelete(client);
+        }}
+        onVolumeChange={() => {
+          handleClientVolumeChange(client);
+        }}
+      />,
+    );
   }
-  if (groupClients.length === 0)
-    return (<div>{snackbar()}</div>);
+  if (groupClients.length === 0) return <div>{snackbar()}</div>;
 
   const stream = props.server.getStream(props.group.stream_id);
   const artUrl = stream?.properties.metadata?.artUrl || logo;
-  const title = stream?.properties.metadata?.title || "Unknown Title";
-  const artist: string = (stream?.properties.metadata?.artist) ? stream!.properties.metadata.artist.join(', ') : "Unknown Artist";
+  const title = stream?.properties.metadata?.title || 'Unknown Title';
+  const artist: string = stream?.properties.metadata?.artist
+    ? stream!.properties.metadata.artist.join(', ')
+    : 'Unknown Artist';
 
-  console.debug("Art URL: " + artUrl);
+  console.debug('Art URL: ' + artUrl);
 
   const allClients = [];
-  for (const group of props.server.groups)
-    for (const client of group.clients)
-      allClients.push(client);
+  for (const group of props.server.groups) for (const client of group.clients) allClients.push(client);
 
   return (
     <div>
-      <Card sx={{
-        p: 2,
-        my: 2,
-        flexGrow: 1
-      }}>
+      <Card
+        sx={{
+          p: 2,
+          my: 2,
+          flexGrow: 1,
+        }}
+      >
         {/* <Stack spacing={2} direction="column" alignItems="center"> */}
-        <Stack spacing={0} direction="column" sx={{ alignItems: "left" }}>
-          <Grid
-            container
-            direction="row"
-            sx={{ justifyContent: "space-between", alignItems: "center" }}
-          >
-            <Stack direction="row" sx={{ justifyContent: "center", alignItems: "center" }}>
-              <IconButton aria-label="Options" onClick={(event) => { handleSettingsClicked(event); }}>
+        <Stack spacing={0} direction="column" sx={{ alignItems: 'left' }}>
+          <Grid container direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <Stack direction="row" sx={{ justifyContent: 'center', alignItems: 'center' }}>
+              <IconButton
+                aria-label="Options"
+                onClick={(event) => {
+                  handleSettingsClicked(event);
+                }}
+              >
                 <SettingsIcon />
               </IconButton>
 
@@ -264,35 +309,53 @@ export default function Group(props: GroupProps) {
                     props.snapcontrol.setStream(props.group.id, stream);
                   }}
                 >
-                  {props.server.streams.map(stream => <MenuItem key={stream.id} value={stream.id}>{stream.id}</MenuItem>)}
+                  {props.server.streams.map((stream) => (
+                    <MenuItem key={stream.id} value={stream.id}>
+                      {stream.id}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
             </Stack>
 
-            {stream?.properties.canControl &&
-              <Stack direction="row" sx={{ justifyContent: "center", alignItems: "center" }}>
-                <IconButton aria-label="previous" onClick={() => { props.snapcontrol.control(props.group.stream_id, 'previous') }}>
+            {stream?.properties.canControl && (
+              <Stack direction="row" sx={{ justifyContent: 'center', alignItems: 'center' }}>
+                <IconButton
+                  aria-label="previous"
+                  onClick={() => {
+                    props.snapcontrol.control(props.group.stream_id, 'previous');
+                  }}
+                >
                   <SkipPreviousIcon />
                 </IconButton>
-                <IconButton aria-label="play/pause" onClick={() => { handlePlayPauseClicked(); }}>
-                  {props.server.getStream(props.group.stream_id)?.properties.playbackStatus === "playing" ? <PauseIcon /> : <PlayArrowIcon />}
+                <IconButton
+                  aria-label="play/pause"
+                  onClick={() => {
+                    handlePlayPauseClicked();
+                  }}
+                >
+                  {props.server.getStream(props.group.stream_id)?.properties.playbackStatus === 'playing' ? (
+                    <PauseIcon />
+                  ) : (
+                    <PlayArrowIcon />
+                  )}
                   {/* sx={{ height: 32, width: 32 }} /> */}
                 </IconButton>
-                <IconButton aria-label="next" onClick={() => { props.snapcontrol.control(props.group.stream_id, 'next') }}>
+                <IconButton
+                  aria-label="next"
+                  onClick={() => {
+                    props.snapcontrol.control(props.group.stream_id, 'next');
+                  }}
+                >
                   <SkipNextIcon />
                 </IconButton>
               </Stack>
-            }
+            )}
           </Grid>
-          {stream?.properties.metadata &&
-            <Stack spacing={2} direction="row" sx={{ alignItems: "center" }}>
-              <CardMedia
-                component="img"
-                sx={{ width: 48 }}
-                image={artUrl}
-                alt={title + " cover"}
-              />
-              <Stack spacing={0} direction="column" sx={{ justifyContent: "center", flexGrow: 1, overflow: 'hidden' }}>
+          {stream?.properties.metadata && (
+            <Stack spacing={2} direction="row" sx={{ alignItems: 'center' }}>
+              <CardMedia component="img" sx={{ width: 48 }} image={artUrl} alt={title + ' cover'} />
+              <Stack spacing={0} direction="column" sx={{ justifyContent: 'center', flexGrow: 1, overflow: 'hidden' }}>
                 <Typography noWrap variant="subtitle1" align="left">
                   {title}
                 </Typography>
@@ -301,51 +364,107 @@ export default function Group(props: GroupProps) {
                 </Typography>
               </Stack>
             </Stack>
-          }
-          {groupClients.length > 1 &&
-            <Stack spacing={2} direction="row" sx={{ alignItems: "center" }}>
-              <IconButton aria-label="Mute" onClick={() => { handleMuteClicked() }}>
+          )}
+          {groupClients.length > 1 && (
+            <Stack spacing={2} direction="row" sx={{ alignItems: 'center' }}>
+              <IconButton
+                aria-label="Mute"
+                onClick={() => {
+                  handleMuteClicked();
+                }}
+              >
                 {props.group.muted ? <VolumeOffIcon /> : <VolumeUpIcon />}
               </IconButton>
-              <Slider aria-label="Volume" color="secondary" min={0} max={100} size="small" key={"slider-" + props.group.id} value={getVolume()} onChange={(_, value) => { handleVolumeChange(value as number) }} onChangeCommitted={(_, value) => { handleVolumeChangeCommitted(value as number) }} />
+              <Slider
+                aria-label="Volume"
+                color="secondary"
+                min={0}
+                max={100}
+                size="small"
+                key={'slider-' + props.group.id}
+                value={getVolume()}
+                onChange={(_, value) => {
+                  handleVolumeChange(value as number);
+                }}
+                onChangeCommitted={(_, value) => {
+                  handleVolumeChangeCommitted(value as number);
+                }}
+              />
             </Stack>
-          }
-          {groupClients.length === 1 &&
-            <Box sx={{ py: 0.5 }} />
-          }
+          )}
+          {groupClients.length === 1 && <Box sx={{ py: 0.5 }} />}
         </Stack>
         <Divider />
         <Box sx={{ py: 0.5 }} />
-        <>
-          {groupClients}
-        </>
+        <>{groupClients}</>
+      </Card>
 
-      </Card >
-
-      <Dialog fullWidth open={settingsOpen} onClose={() => { handleSettingsClose(false) }}>
+      <Dialog
+        fullWidth
+        open={settingsOpen}
+        onClose={() => {
+          handleSettingsClose(false);
+        }}
+      >
         <DialogTitle>Group settings</DialogTitle>
         <DialogContent>
           <Divider textAlign="left">Stream</Divider>
           <TextField
-            // label="Stream" 
-            margin="dense" id="stream" select fullWidth variant="standard"
+            // label="Stream"
+            margin="dense"
+            id="stream"
+            select
+            fullWidth
+            variant="standard"
             value={streamId}
-            onChange={(event) => { console.log('SetStream: ' + event.target.value); setStreamId(event.target.value) }}
+            onChange={(event) => {
+              console.log('SetStream: ' + event.target.value);
+              setStreamId(event.target.value);
+            }}
           >
-            {props.server.streams.map(stream => <MenuItem key={stream.id} value={stream.id}>{stream.id}</MenuItem>)}
+            {props.server.streams.map((stream) => (
+              <MenuItem key={stream.id} value={stream.id}>
+                {stream.id}
+              </MenuItem>
+            ))}
           </TextField>
           <Divider textAlign="left">Clients</Divider>
           <FormGroup>
-            {clients.map(client => <FormControlLabel control={<Checkbox checked={client.inGroup} key={"cb-" + client.client.id} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { handleGroupClientChange(client.client, e.target.checked) }} />} label={client.client.getName()} key={"label-" + client.client.id} />)}
+            {clients.map((client) => (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={client.inGroup}
+                    key={'cb-' + client.client.id}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      handleGroupClientChange(client.client, e.target.checked);
+                    }}
+                  />
+                }
+                label={client.client.getName()}
+                key={'label-' + client.client.id}
+              />
+            ))}
           </FormGroup>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { handleSettingsClose(false) }}>Cancel</Button>
-          <Button onClick={() => { handleSettingsClose(true) }}>OK</Button>
+          <Button
+            onClick={() => {
+              handleSettingsClose(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              handleSettingsClose(true);
+            }}
+          >
+            OK
+          </Button>
         </DialogActions>
       </Dialog>
       {snackbar()}
-    </div >
+    </div>
   );
 }
-
