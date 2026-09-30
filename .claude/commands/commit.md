@@ -7,17 +7,19 @@ description: Commit staged/modified changes with a detailed message and push, no
 ## Steps
 
 1. Run `git status` and `git diff` (and `git diff --staged` if anything is already staged) to see all changes.
-2. Lint and typecheck whatever's actually touched, before staging anything:
-   - Any `src/**/*.{ts,tsx}`, `vite.config.ts`, or `tsconfig*.json` changed:
-     `npm run lint`, then `npm run build` (runs `tsc` then `vite build`, same as CI).
+2. Lint, typecheck and test whatever's actually touched, before staging anything:
+   - Any `src/**/*.{ts,tsx}`, `tests/**`, `vite.config.ts`, `vitest.config.ts`,
+     or `tsconfig*.json` changed: `npm run lint`, then `npm run build` (runs
+     `tsc` then `vite build`), then `npm test` (unit tests).
    - Any `package.json` / `package-lock.json` changed: run `npm ci` first so the
      lockfile is verified to match, then the checks above.
-   - `changelog.md` changed: run `python3 debian/changelog_md2deb.py changelog.md > /dev/null`
-     to make sure the Debian changelog conversion (used by CI) still parses it.
+   - `npm run test:integration` talks to a real Snapserver and changes its
+     state; only run it when the change touches `tests/integration/` or the
+     protocol code in `src/snapcontrol.ts`.
    - If any check reports an error, fix it and re-run before continuing.
-   - There is no formatter or test suite in this repo — don't invent one.
-   - ESLint already ignores `dist/` and `debian/` (`eslint.config.js`) — don't
-     pass explicit paths that would pull those in.
+   - There is no formatter in this repo — don't invent one.
+   - ESLint already ignores `dist/`, `debian/` and `coverage/`
+     (`eslint.config.js`) — don't pass explicit paths that would pull those in.
 3. If nothing is staged, stage all relevant modified/new files with `git add`.
 4. Write a **detailed** commit message:
    - Subject line: concise summary of the change (imperative mood, e.g. "Add", "Fix", "Refactor").
