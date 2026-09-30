@@ -9,7 +9,6 @@ type ServerProps = {
 };
 
 export default function Server(props: ServerProps) {
-  console.log('Render Server');
   return (
     <Box sx={{ m: 1.5 }}>
       {props.server.groups.map((group) => (

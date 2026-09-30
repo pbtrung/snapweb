@@ -15,7 +15,7 @@ import {
   Box,
 } from '@mui/material';
 import { useState } from 'react';
-import { config, Theme } from '../config.ts';
+import { config, Theme } from '../config';
 
 export default function SettingsDialog(props: { open: boolean; onClose: (_apply: boolean) => void }) {
   const [serverurl, setServerurl] = useState(config.baseUrl);
@@ -33,7 +33,7 @@ export default function SettingsDialog(props: { open: boolean; onClose: (_apply:
 
   return (
     <div>
-      <Dialog open={props.open}>
+      <Dialog open={props.open} onClose={() => handleClose(false)}>
         <DialogTitle>Settings</DialogTitle>
         <DialogContent dividers>
           <TextField
@@ -53,14 +53,11 @@ export default function SettingsDialog(props: { open: boolean; onClose: (_apply:
           <FormControl variant="standard" fullWidth sx={{ minWidth: 100 }}>
             <InputLabel id="theme-label">Theme</InputLabel>
             <Select
-              labelId="theme-select-label"
-              id="demo-theme-select"
+              labelId="theme-label"
+              id="theme-select"
               value={theme}
               label="Theme"
-              onChange={(event: SelectChangeEvent<Theme>) => {
-                console.log('Theme selected: ' + event.target.value);
-                setTheme(event.target.value as Theme);
-              }}
+              onChange={(event: SelectChangeEvent<Theme>) => setTheme(event.target.value as Theme)}
             >
               <MenuItem value={Theme.System}>{Theme.System}</MenuItem>
               <MenuItem value={Theme.Light}>{Theme.Light}</MenuItem>

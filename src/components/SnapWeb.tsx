@@ -25,78 +25,48 @@ import { PlayArrow as PlayArrowIcon, Stop as StopIcon, Menu as MenuIcon } from '
 import { createTheme, ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import silence from '../assets/10-seconds-of-silence.mp3';
-import snapcast512 from '../assets/snapcast-512.png';
+import { updateMediaSession } from '../mediaSession';
 
-const lightTheme = createTheme({
-  palette: {
-    primary: {
-      light: '#757ce8',
-      main: '#607d8b',
-      dark: '#002884',
-      contrastText: '#fff',
-    },
-    secondary: {
-      light: '#ff7961',
-      main: '#f44336',
-      dark: '#ba000d',
-      contrastText: '#000',
-    },
-  },
-  typography: {
-    subtitle1: {
-      fontSize: 17,
-    },
-    body1: {
-      fontWeight: 500,
-    },
-    h5: {
-      fontWeight: 300,
-    },
-  },
-  components: {
-    MuiTextField: {
-      defaultProps: {
-        spellCheck: false,
+function makeTheme(mode: 'light' | 'dark') {
+  return createTheme({
+    palette: {
+      mode,
+      primary: {
+        light: '#757ce8',
+        main: '#607d8b',
+        dark: '#002884',
+        contrastText: '#fff',
+      },
+      secondary: {
+        light: '#ff7961',
+        main: '#f44336',
+        dark: '#ba000d',
+        contrastText: '#000',
       },
     },
-  },
-});
-
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      light: '#757ce8',
-      main: '#607d8b',
-      dark: '#002884',
-      contrastText: '#fff',
-    },
-    secondary: {
-      light: '#ff7961',
-      main: '#f44336',
-      dark: '#ba000d',
-      contrastText: '#000',
-    },
-  },
-  typography: {
-    subtitle1: {
-      fontSize: 17,
-    },
-    body1: {
-      fontWeight: 500,
-    },
-    h5: {
-      fontWeight: 300,
-    },
-  },
-  components: {
-    MuiTextField: {
-      defaultProps: {
-        spellCheck: false,
+    typography: {
+      subtitle1: {
+        fontSize: 17,
+      },
+      body1: {
+        fontWeight: 500,
+      },
+      h5: {
+        fontWeight: 300,
       },
     },
-  },
-});
+    components: {
+      MuiTextField: {
+        defaultProps: {
+          spellCheck: false,
+        },
+      },
+    },
+  });
+}
+
+const lightTheme = makeTheme('light');
+const darkTheme = makeTheme('dark');
 
 export default function SnapWeb() {
   const [, setUpdate] = useState(0);
@@ -126,202 +96,33 @@ export default function SnapWeb() {
 
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
 
-  // Update color theme when the preferred theme changes
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => setTheme(config.theme);
-    mediaQuery.addEventListener('change', onChange);
-    return () => mediaQuery.removeEventListener('change', onChange);
-  }, []);
-
-  useEffect(() => {
-    console.debug('server updated');
-  }, [server]);
-
-  useEffect(() => {
-    console.debug('serverUrl updated: ' + serverUrl);
     snapControl.connect(serverUrl);
-    const connection = snapControl;
-    return () => {
-      connection.disconnect();
-    };
+    return () => snapControl.disconnect();
   }, [serverUrl, snapControl]);
 
   function getMyStreamId(): string {
     try {
-      const group = snapControl.getGroupFromClient(getClientId());
-      return snapControl.getStream(group.stream_id).id;
+      return snapControl.getGroupFromClient(getClientId()).stream_id;
     } catch {
       return '';
     }
   }
 
-  function updateMediaSession() {
-    // https://developers.google.com/web/updates/2017/02/media-session
-    // https://github.com/googlechrome/samples/tree/gh-pages/media-session
-    // https://googlechrome.github.io/samples/media-session/audio.html
-    // https://developer.mozilla.org/en-US/docs/Web/API/MediaSession/setActionHandler#seekto
-    console.debug('updateMediaSession');
+  function handleChange(snapserver: Snapcast.Server) {
+    setServer(snapserver);
+    // The model is updated in place, so a new render is needed even when
+    // snapserver is the same object as before
+    setUpdate((u) => u + 1);
     if (!snapstreamRef.current) return;
     try {
-      const streamId = getMyStreamId();
-      const properties = snapControl.getStream(streamId).properties;
-      const metadata = properties.metadata;
-      const title: string = metadata?.title || 'Unknown Title';
-      const artist: string = metadata?.artist !== undefined ? metadata?.artist.join(', ') : 'Unknown Artist';
-      const album: string = metadata?.album || '';
-      let artwork: Array<MediaImage> = [{ src: snapcast512, sizes: '512x512', type: 'image/png' }];
-      if (metadata?.artUrl !== undefined) {
-        artwork = [
-          { src: metadata.artUrl, sizes: '96x96', type: 'image/png' },
-          { src: metadata.artUrl, sizes: '128x128', type: 'image/png' },
-          { src: metadata.artUrl, sizes: '192x192', type: 'image/png' },
-          { src: metadata.artUrl, sizes: '256x256', type: 'image/png' },
-          { src: metadata.artUrl, sizes: '384x384', type: 'image/png' },
-          { src: metadata.artUrl, sizes: '512x512', type: 'image/png' },
-        ];
-      } // || 'snapcast-512.png';
-      console.info('Metadata title: ' + title + ', artist: ' + artist + ', album: ' + album + ', artwork: ' + artwork);
-      navigator.mediaSession!.metadata = new MediaMetadata({
-        title: title,
-        artist: artist,
-        album: album,
-        artwork: artwork,
-      });
-
-      const mediaSession = navigator.mediaSession!;
-      let play_state: MediaSessionPlaybackState = 'none';
-      if (properties.playbackStatus !== undefined) {
-        if (properties.playbackStatus === 'playing') {
-          console.debug('updateMediaSession: playing');
-          audioRef.current.play();
-          play_state = 'playing';
-        } else if (properties.playbackStatus === 'paused') {
-          console.debug('updateMediaSession: paused');
-          audioRef.current.pause();
-          play_state = 'paused';
-        } else if (properties.playbackStatus === 'stopped') {
-          console.debug('updateMediaSession: stopped');
-          audioRef.current.pause();
-          play_state = 'none';
-        }
-      }
-
-      mediaSession.playbackState = play_state;
-      mediaSession.setActionHandler(
-        'play',
-        properties.canPlay
-          ? () => {
-              snapControl.control(streamId, 'play');
-            }
-          : null,
-      );
-      mediaSession.setActionHandler(
-        'pause',
-        properties.canPause
-          ? () => {
-              snapControl.control(streamId, 'pause');
-            }
-          : null,
-      );
-      mediaSession.setActionHandler(
-        'previoustrack',
-        properties.canGoPrevious
-          ? () => {
-              snapControl.control(streamId, 'previous');
-            }
-          : null,
-      );
-      mediaSession.setActionHandler(
-        'nexttrack',
-        properties.canGoNext
-          ? () => {
-              snapControl.control(streamId, 'next');
-            }
-          : null,
-      );
-      try {
-        mediaSession.setActionHandler(
-          'stop',
-          properties.canControl
-            ? () => {
-                snapControl.control(streamId, 'stop');
-              }
-            : null,
-        );
-      } catch {
-        console.debug('Warning! The "stop" media session action is not supported.');
-      }
-      const defaultSkipTime: number = 10; // Time to skip in seconds by default
-      mediaSession.setActionHandler(
-        'seekbackward',
-        properties.canSeek
-          ? (event: MediaSessionActionDetails) => {
-              const offset: number = (event.seekOffset || defaultSkipTime) * -1;
-              snapControl.control(streamId, 'seek', { offset: offset });
-            }
-          : null,
-      );
-
-      mediaSession.setActionHandler(
-        'seekforward',
-        properties.canSeek
-          ? (event: MediaSessionActionDetails) => {
-              const offset: number = event.seekOffset || defaultSkipTime;
-              snapControl.control(streamId, 'seek', { offset: offset });
-            }
-          : null,
-      );
-
-      try {
-        mediaSession.setActionHandler(
-          'seekto',
-          properties.canSeek
-            ? (event: MediaSessionActionDetails) => {
-                const position: number = event.seekTime || 0;
-                snapControl.control(streamId, 'setPosition', { position: position });
-              }
-            : null,
-        );
-      } catch {
-        console.debug('Warning! The "seekto" media session action is not supported.');
-      }
-
-      if (
-        metadata?.duration !== undefined &&
-        properties.position !== undefined &&
-        properties.position! <= metadata.duration!
-      ) {
-        if ('setPositionState' in mediaSession) {
-          console.debug('Updating position state: ' + properties.position! + '/' + metadata.duration!);
-          mediaSession.setPositionState!({
-            duration: metadata.duration,
-            playbackRate: 1.0,
-            position: properties.position!,
-          });
-        }
-      } else {
-        mediaSession.setPositionState!({
-          duration: 0,
-          playbackRate: 1.0,
-          position: 0,
-        });
-      }
+      updateMediaSession(snapControl, getMyStreamId(), audioRef.current);
     } catch (e) {
-      console.debug('updateMediaSession failed: ' + e);
-      return;
+      console.debug('Failed to update the media session: ' + e);
     }
   }
 
-  function handleChange(snapserver: Snapcast.Server) {
-    console.debug('Update: ' + server.groups.length + ' => ' + snapserver.groups.length);
-    setServer(snapserver);
-    setUpdate((u) => u + 1);
-    updateMediaSession();
-  }
-
   function handleConnectionChanged(connected: boolean, error?: string) {
-    console.log('Connection state changed: ' + connected + ', error: ' + error);
     if (!connected) {
       setIsPlaying(false);
       setServer(new Snapcast.Server());
@@ -336,99 +137,49 @@ export default function SnapWeb() {
   });
 
   useEffect(() => {
-    if (isPlaying) {
-      console.debug('isPlaying changed to true');
-      audioRef.current.src = silence;
-      audioRef.current.loop = true;
-      // The audio stream and its decoders are loaded on first use, which
-      // keeps them out of the initial bundle
-      let cancelled = false;
-      Promise.all([audioRef.current.play(), import('../snapstream')]).then(([, { SnapStream }]) => {
-        if (!cancelled) snapstreamRef.current = new SnapStream(config.baseUrl);
-      });
-      return () => {
-        cancelled = true;
-      };
-    } else {
-      console.debug('isPlaying changed to false');
-      if (snapstreamRef.current) snapstreamRef.current.stop();
+    const audio = audioRef.current;
+    if (!isPlaying) {
+      snapstreamRef.current?.stop();
       snapstreamRef.current = null;
-      audioRef.current.pause();
-      audioRef.current.src = '';
-      // updateMediaSession();
-      // document.body.removeChild(audio);
+      audio.pause();
+      audio.src = '';
+      return;
     }
+    // Looping silence keeps the page's media session alive while playing
+    audio.src = silence;
+    audio.loop = true;
+    // The audio stream and its decoders are loaded on first use, which
+    // keeps them out of the initial bundle
+    let cancelled = false;
+    Promise.all([audio.play(), import('../snapstream')])
+      .then(([, { SnapStream }]) => {
+        if (!cancelled) snapstreamRef.current = new SnapStream(config.baseUrl);
+      })
+      .catch((e) => {
+        // e.g. the browser's autoplay policy rejected play()
+        console.warn('Failed to start playback: ' + e);
+        if (!cancelled) setIsPlaying(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [isPlaying]);
 
-  function list() {
+  function connectionSnackbar() {
+    if (isConnected) return null;
     return (
-      <Box
-        // sx={{ width: 250 }}
-        role="presentation"
-        sx={{ mt: 1 }}
-        // onClick={toggleDrawer(anchor, false)}
-        // onKeyDown={toggleDrawer(anchor, false)}
-      >
-        <List>
-          <ListItem key="about" disablePadding>
-            <ListItemButton
-              onClick={() => {
-                setAboutOpen(true);
-                setDrawerOpen(false);
-              }}
-            >
-              <ListItemText primary="About..." />
-            </ListItemButton>
-          </ListItem>
-          <ListItem key="settings" disablePadding>
-            <ListItemButton
-              onClick={() => {
-                setSettingsOpen(true);
-                setDrawerOpen(false);
-              }}
-            >
-              <ListItemText primary="Settings..." />
-            </ListItemButton>
-          </ListItem>
-        </List>
-      </Box>
-    );
-  }
-
-  function snackbar() {
-    if (isConnected) {
-      return null;
-    }
-    return (
-      <Snackbar
-        open
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        key="connect-error"
-        onClose={(_, reason: string) => {
-          if (reason !== 'clickaway') {
-            console.log('Snackbar - onClose');
-          }
-        }}
-      >
+      <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert
-          onClose={(_) => {
-            console.log('Snackbar - alert onClose');
-          }}
-          severity="error"
+          severity={connectError ? 'error' : 'info'}
           sx={{ width: '100%' }}
           action={
-            <Button
-              color="inherit"
-              size="small"
-              onClick={(_) => {
-                setSettingsOpen(true);
-              }}
-            >
+            <Button color="inherit" size="small" onClick={() => setSettingsOpen(true)}>
               Settings
             </Button>
           }
         >
-          {connectError + '\nSnapserver host: ' + config.baseUrl}
+          <div>{connectError || 'Connecting...'}</div>
+          <div>Snapserver host: {serverUrl}</div>
         </Alert>
       </Snackbar>
     );
@@ -446,63 +197,71 @@ export default function SnapWeb() {
               color="inherit"
               aria-label="menu"
               sx={{ mr: 2 }}
-              onClick={(_) => {
-                setDrawerOpen(true);
-              }}
+              onClick={() => setDrawerOpen(true)}
             >
               <MenuIcon />
             </IconButton>
             <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
               Snapcast
             </Typography>
-            {isConnected ? (
+            {isConnected && (
               <IconButton
                 size="large"
                 edge="start"
                 color="inherit"
-                aria-label="menu"
+                aria-label={isPlaying ? 'Stop playing' : 'Play on this device'}
                 sx={{ mr: 2 }}
-                onClick={(_) => {
-                  setIsPlaying(!isPlaying);
-                }}
+                onClick={() => setIsPlaying(!isPlaying)}
               >
                 {isPlaying ? <StopIcon fontSize="large" /> : <PlayArrowIcon fontSize="large" />}
               </IconButton>
-            ) : (
-              <IconButton></IconButton>
             )}
           </Toolbar>
         </AppBar>
-        <Drawer
-          anchor="top"
-          open={drawerOpen} //</div>={state[anchor]}
-          onClose={() => {
-            setDrawerOpen(false);
-          }}
-        >
-          {list()}
+        <Drawer anchor="top" open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+          <Box role="presentation" sx={{ mt: 1 }}>
+            <List>
+              <ListItem disablePadding>
+                <ListItemButton
+                  onClick={() => {
+                    setAboutOpen(true);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <ListItemText primary="About..." />
+                </ListItemButton>
+              </ListItem>
+              <ListItem disablePadding>
+                <ListItemButton
+                  onClick={() => {
+                    setSettingsOpen(true);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <ListItemText primary="Settings..." />
+                </ListItemButton>
+              </ListItem>
+            </List>
+          </Box>
         </Drawer>
         <Server server={server} snapcontrol={snapControl} showOffline={showOffline} />
-        {snackbar()}
-        <AboutDialog
-          open={aboutOpen}
-          onClose={() => {
-            setAboutOpen(false);
-          }}
-        />
-        <SettingsDialog
-          open={settingsOpen}
-          onClose={(apply: boolean) => {
-            console.log('Apply: ' + apply + ', Serrver url: ' + config.baseUrl);
-            setSettingsOpen(false);
-            if (apply) {
-              if (config.baseUrl !== serverUrl) setServer(new Snapcast.Server());
-              setServerUrl(config.baseUrl);
-              setTheme(config.theme);
-              setShowOffline(config.showOffline);
-            }
-          }}
-        />
+        {connectionSnackbar()}
+        <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+        {/* Mounted only while open, so it starts from the saved settings each time */}
+        {settingsOpen && (
+          <SettingsDialog
+            open
+            onClose={(apply: boolean) => {
+              setSettingsOpen(false);
+              if (apply) {
+                if (config.baseUrl !== serverUrl) setServer(new Snapcast.Server());
+                setServerUrl(config.baseUrl);
+                setTheme(config.theme);
+                setShowOffline(config.showOffline);
+              }
+            }}
+          />
+        )}
       </div>
     </ThemeProvider>
   );

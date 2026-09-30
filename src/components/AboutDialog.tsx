@@ -17,6 +17,7 @@ export default function AboutDialog(props: { open: boolean; onClose: () => void 
     <div>
       <Dialog
         open={props.open}
+        onClose={props.onClose}
         scroll="paper"
         aria-labelledby="scroll-dialog-title"
         aria-describedby="scroll-dialog-description"

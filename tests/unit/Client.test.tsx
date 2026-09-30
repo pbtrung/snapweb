@@ -30,7 +30,7 @@ describe('Client', () => {
   }
 
   function volumeSlider() {
-    return screen.getByRole('slider', { name: 'Volume' });
+    return screen.getByRole('slider', { name: / volume$/ });
   }
 
   it('shows the configured name, or the host name', () => {
@@ -68,25 +68,25 @@ describe('Client', () => {
     renderClient('c1');
     expect(screen.getByTestId('VolumeUpIcon')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Mute' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Mute / }));
     expect(requests(ws, 'Client.SetVolume').slice(-1)[0].params.volume).toEqual({ muted: true, percent: 40 });
     expect(screen.getByTestId('VolumeOffIcon')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Mute' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Mute / }));
     expect(requests(ws, 'Client.SetVolume').slice(-1)[0].params.volume).toEqual({ muted: false, percent: 40 });
     expect(screen.getByTestId('VolumeUpIcon')).toBeInTheDocument();
   });
 
   it('only offers Delete for offline clients', async () => {
     renderClient('c1');
-    await userEvent.click(screen.getByRole('button', { name: 'Options' }));
+    await userEvent.click(screen.getByRole('button', { name: / options$/ }));
     expect(screen.getByRole('menuitem', { name: 'Details' })).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument();
   });
 
   it('calls onDelete from the menu of an offline client', async () => {
     const { onDelete } = renderClient('c3');
-    await userEvent.click(screen.getByRole('button', { name: 'Options' }));
+    await userEvent.click(screen.getByRole('button', { name: / options$/ }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
 
     expect(onDelete).toHaveBeenCalledTimes(1);
@@ -95,7 +95,7 @@ describe('Client', () => {
 
   describe('details dialog', () => {
     async function openDetails() {
-      await userEvent.click(screen.getByRole('button', { name: 'Options' }));
+      await userEvent.click(screen.getByRole('button', { name: / options$/ }));
       await userEvent.click(screen.getByRole('menuitem', { name: 'Details' }));
       return screen.getByRole('dialog');
     }

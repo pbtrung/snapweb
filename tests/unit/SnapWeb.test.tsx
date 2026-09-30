@@ -70,6 +70,12 @@ describe('SnapWeb', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Snapserver host: ws://snapserver:1780');
   });
 
+  it('says it is connecting until connected', () => {
+    render(<SnapWeb />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Connecting...');
+    expect(screen.queryByRole('button', { name: 'Play on this device' })).not.toBeInTheDocument();
+  });
+
   it('shows the groups once connected', () => {
     render(<SnapWeb />);
     connect();
@@ -109,7 +115,9 @@ describe('SnapWeb', () => {
   });
 
   async function openFromMenu(item: string) {
-    await userEvent.click(screen.getAllByRole('button', { name: 'menu' })[0]);
+    // Wait for an earlier drawer or dialog to finish closing
+    const menu = await screen.findAllByRole('button', { name: 'menu' });
+    await userEvent.click(menu[0]);
     await userEvent.click(screen.getByRole('button', { name: item }));
   }
 
@@ -137,6 +145,16 @@ describe('SnapWeb', () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(screen.getByText('Kitchen')).toBeInTheDocument();
     expect(screen.getByText('host-c3')).toBeInTheDocument();
+  });
+
+  it('drops cancelled settings edits the next time the dialog opens', async () => {
+    render(<SnapWeb />);
+    await openFromMenu('Settings...');
+    await userEvent.type(screen.getByLabelText('Snapserver host'), '/typo');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await openFromMenu('Settings...');
+
+    expect(screen.getByLabelText('Snapserver host')).toHaveValue('ws://snapserver:1780');
   });
 
   it('opens the about dialog from the menu', async () => {
@@ -292,6 +310,17 @@ describe('SnapWeb', () => {
       connect();
       expect(session.metadata).toBeNull();
     });
+  });
+
+  it('offers playback again when the browser refuses to play', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValue(new Error('NotAllowedError'));
+    render(<SnapWeb />);
+    connect();
+    await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Play on this device' })).toBeInTheDocument());
+    expect(snapStream.created).toEqual([]);
   });
 
   it('does not start the stream when stopped before the audio code loaded', async () => {

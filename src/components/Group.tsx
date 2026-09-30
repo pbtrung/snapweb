@@ -1,5 +1,4 @@
-import React, { useRef } from 'react';
-import { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import Client from './Client';
 import logo from '../assets/logo192.png';
 import { SnapControl, Snapcast } from '../snapcontrol';
@@ -48,232 +47,153 @@ type GroupProps = {
   showOffline: boolean;
 };
 
-type GroupVolumeChange = {
-  volumeEntered: boolean;
-  client_volumes: Map<string, number>;
-  group_volume: number;
+// Client volumes at the start of a group volume drag, which the drag scales from
+type VolumeDrag = {
+  clientVolumes: Map<string, number>;
+  groupVolume: number;
 };
+
+// How long "Deleted <client>" can be undone before the client is deleted
+const UNDO_DELETE_MS = 6000;
+
+// Scale a client volume by the same ratio the group volume moved, towards
+// 0 when lowering and towards 100 when raising
+function scaleVolume(clientVolume: number, fromGroupVolume: number, toGroupVolume: number): number {
+  if (toGroupVolume < fromGroupVolume)
+    return fromGroupVolume === 0 ? 0 : clientVolume * (toGroupVolume / fromGroupVolume);
+  if (fromGroupVolume === 100) return clientVolume;
+  return clientVolume + (100 - clientVolume) * ((toGroupVolume - fromGroupVolume) / (100 - fromGroupVolume));
+}
 
 export default function Group(props: GroupProps) {
   const [, setUpdate] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [clients, setClients] = useState<GroupClient[]>([]);
-  const [streamId, setStreamId] = useState('');
-  const [deletedClients, setDeletedClients] = useState<Snapcast.Client[]>([]);
-  const groupVolumeChange = useRef<GroupVolumeChange>({
-    volumeEntered: true,
-    client_volumes: new Map<string, number>(),
-    group_volume: 0,
-  });
+  const [settingsClients, setSettingsClients] = useState<GroupClient[]>([]);
+  const [settingsStreamId, setSettingsStreamId] = useState('');
+  // Ids, since a server update replaces the client objects
+  const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
+  const volumeDrag = useRef<VolumeDrag | null>(null);
+
+  // The model is updated in place, so re-render to show the new values
+  function refresh() {
+    setUpdate((u) => u + 1);
+  }
+
+  function getClients(): Snapcast.Client[] {
+    return props.group.clients.filter(
+      (client) => (client.connected || props.showOffline) && !deletedClientIds.includes(client.id),
+    );
+  }
 
   function getVolume(): number {
     const clients = getClients();
     // Avoid a NaN volume for groups without (online) clients
     if (clients.length === 0) return 0;
-    let volume = 0;
-    for (const client of clients) volume += client.config.volume.percent;
-    return volume / clients.length;
+    return clients.reduce((sum, client) => sum + client.config.volume.percent, 0) / clients.length;
   }
 
-  // The client volumes live in the mutable server model, so force a re-render
-  // to pick up the new group volume
-  function updateVolume() {
-    setUpdate((u) => u + 1);
-  }
-
-  function handleSettingsClicked(_event: React.MouseEvent<HTMLButtonElement>) {
-    console.debug('handleSettingsClicked');
-
-    const clients: GroupClient[] = [];
-    for (const group of props.server.groups) {
-      for (const client of group.clients) {
-        const inGroup: boolean = props.group.clients.includes(client);
-        clients.push({ client: client, inGroup: inGroup, wasInGroup: inGroup });
-      }
-    }
-
-    // this.clients = [];
-    // props.server.groups.map(group => group.clients.map(client => this.clients.push(client.id)));
+  function handleSettingsClicked() {
+    setSettingsClients(
+      props.server.groups.flatMap((group) =>
+        group.clients.map((client) => {
+          const inGroup = props.group.clients.includes(client);
+          return { client, inGroup, wasInGroup: inGroup };
+        }),
+      ),
+    );
+    setSettingsStreamId(props.group.stream_id);
     setSettingsOpen(true);
-    setClients(clients);
-    setStreamId(props.group.stream_id);
   }
 
   function handleSettingsClose(apply: boolean) {
-    console.debug('handleSettingsClose: ' + apply);
     if (apply) {
-      let changed: boolean = false;
-      for (const element of clients) {
-        if (element.inGroup !== element.wasInGroup) {
-          changed = true;
-          break;
-        }
-      }
-
-      if (changed) {
-        const groupClients: string[] = [];
-        for (const element of clients) if (element.inGroup) groupClients.push(element.client.id);
-        props.snapcontrol.setClients(props.group.id, groupClients);
-      }
-
-      if (props.group.stream_id !== streamId) props.snapcontrol.setStream(props.group.id, streamId);
+      if (settingsClients.some((element) => element.inGroup !== element.wasInGroup))
+        props.snapcontrol.setClients(
+          props.group.id,
+          settingsClients.filter((element) => element.inGroup).map((element) => element.client.id),
+        );
+      if (props.group.stream_id !== settingsStreamId) props.snapcontrol.setStream(props.group.id, settingsStreamId);
     }
     setSettingsOpen(false);
   }
 
   function handleGroupClientChange(client: Snapcast.Client, inGroup: boolean) {
-    console.debug('handleGroupClientChange: ' + client.id + ', in group: ' + inGroup);
-    setClients(clients.map((element) => (element.client === client ? { ...element, inGroup: inGroup } : element)));
+    setSettingsClients(
+      settingsClients.map((element) => (element.client === client ? { ...element, inGroup } : element)),
+    );
   }
 
   function handleClientDelete(client: Snapcast.Client) {
-    console.debug('handleClientDelete: ' + client.getName());
-    const newDeletedClients = deletedClients;
-    if (!newDeletedClients.includes(client)) newDeletedClients.push(client);
-    setDeletedClients(newDeletedClients);
-    // dummy update, since the array was just mutated
-    setUpdate((u) => u + 1);
+    if (!deletedClientIds.includes(client.id)) setDeletedClientIds([...deletedClientIds, client.id]);
   }
 
-  function handleClientVolumeChange(client: Snapcast.Client) {
-    console.debug('handleClientVolumeChange: ' + client.getName());
-    updateVolume();
-  }
-
-  function handleSnackbarClose(client: Snapcast.Client, undo: boolean) {
-    console.debug('handleSnackbarClose, client: ' + client.getName() + ', undo: ' + undo);
-    if (!undo) props.snapcontrol.deleteClient(client.id);
-
-    const newDeletedClients = deletedClients;
-    if (newDeletedClients.includes(client)) newDeletedClients.splice(newDeletedClients.indexOf(client), 1);
-
-    setDeletedClients(newDeletedClients);
-    setUpdate((u) => u + 1);
+  function handleSnackbarClose(clientId: string, undo: boolean) {
+    if (!undo) props.snapcontrol.deleteClient(clientId);
+    setDeletedClientIds((ids) => ids.filter((id) => id !== clientId));
   }
 
   function handleMuteClicked() {
-    console.debug('handleMuteClicked');
     props.snapcontrol.muteGroup(props.group.id, !props.group.muted);
-    setUpdate((u) => u + 1);
+    refresh();
   }
 
   function handleVolumeChange(value: number) {
-    console.debug('handleVolumeChange: ' + value);
-    if (groupVolumeChange.current.volumeEntered) {
-      groupVolumeChange.current.client_volumes.clear();
-      groupVolumeChange.current.group_volume = 0;
-      for (const client of getClients()) {
-        groupVolumeChange.current.client_volumes.set(client.id, client.config.volume.percent);
-        groupVolumeChange.current.group_volume += client.config.volume.percent;
-      }
-      groupVolumeChange.current.group_volume /= groupVolumeChange.current.client_volumes.size;
-      groupVolumeChange.current.volumeEntered = false;
+    if (volumeDrag.current === null) {
+      const clients = getClients();
+      volumeDrag.current = {
+        clientVolumes: new Map(clients.map((client) => [client.id, client.config.volume.percent])),
+        groupVolume: getVolume(),
+      };
     }
-
-    const delta = value - groupVolumeChange.current.group_volume;
-    let ratio: number;
-    if (delta < 0) ratio = (groupVolumeChange.current.group_volume - value) / groupVolumeChange.current.group_volume;
-    else ratio = (value - groupVolumeChange.current.group_volume) / (100 - groupVolumeChange.current.group_volume);
-
+    const drag = volumeDrag.current;
     for (const client of getClients()) {
-      let new_volume = groupVolumeChange.current.client_volumes.get(client.id)!;
-      if (delta < 0) new_volume -= ratio * new_volume;
-      else new_volume += ratio * (100 - new_volume);
-
-      client.config.volume.percent = new_volume;
-      props.snapcontrol.setVolume(client.id, new_volume);
+      // A client that appeared during the drag keeps its volume
+      const startVolume = drag.clientVolumes.get(client.id);
+      if (startVolume === undefined) continue;
+      props.snapcontrol.setVolume(client.id, scaleVolume(startVolume, drag.groupVolume, value));
     }
-
-    updateVolume();
+    refresh();
   }
 
-  function handleVolumeChangeCommitted(value: number) {
-    console.debug('handleVolumeChangeCommitted: ' + value);
-    groupVolumeChange.current.volumeEntered = true;
+  function handlePlayPauseClicked(stream: Snapcast.Stream) {
+    props.snapcontrol.control(stream.id, stream.properties.playbackStatus === 'playing' ? 'pause' : 'play');
   }
 
-  function handlePlayPauseClicked() {
-    if (props.server.getStream(props.group.stream_id)?.properties.playbackStatus === 'playing')
-      props.snapcontrol.control(props.group.stream_id, 'pause');
-    else props.snapcontrol.control(props.group.stream_id, 'play');
-  }
-
-  function snackbar() {
-    return deletedClients.map((client) => (
+  const deleteSnackbars = deletedClientIds.map((clientId) => {
+    const name = props.server.getClient(clientId)?.getName() ?? clientId;
+    return (
       <Snackbar
         open
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        autoHideDuration={6000}
-        key={'snackbar-' + client.id}
-        onClose={(_, reason: string) => {
-          if (reason !== 'clickaway') handleSnackbarClose(client, false);
+        autoHideDuration={UNDO_DELETE_MS}
+        key={'snackbar-' + clientId}
+        onClose={(_, reason) => {
+          if (reason !== 'clickaway') handleSnackbarClose(clientId, false);
         }}
       >
         <Alert
-          onClose={(_) => {
-            handleSnackbarClose(client, false);
-          }}
           severity="info"
           sx={{ width: '100%' }}
           action={
-            <Button
-              color="inherit"
-              size="small"
-              onClick={(_) => {
-                handleSnackbarClose(client, true);
-              }}
-            >
+            <Button color="inherit" size="small" onClick={() => handleSnackbarClose(clientId, true)}>
               Undo
             </Button>
           }
         >
-          Deleted {client.getName()}
+          Deleted {name}
         </Alert>
       </Snackbar>
-    ));
-  }
-
-  function getClients(): Snapcast.Client[] {
-    const clients = [];
-    for (const client of props.group.clients) {
-      if ((client.connected || props.showOffline) && !deletedClients.includes(client)) {
-        clients.push(client);
-      }
-    }
-    return clients;
-  }
-
-  // console.debug("Render Group " + props.group.id);
-  const groupClients = [];
-
-  for (const client of getClients()) {
-    groupClients.push(
-      <Client
-        key={client.id}
-        client={client}
-        snapcontrol={props.snapcontrol}
-        onDelete={() => {
-          handleClientDelete(client);
-        }}
-        onVolumeChange={() => {
-          handleClientVolumeChange(client);
-        }}
-      />,
     );
-  }
-  if (groupClients.length === 0) return <div>{snackbar()}</div>;
+  });
 
+  const clients = getClients();
+  if (clients.length === 0) return <div>{deleteSnackbars}</div>;
+
+  const groupName = props.group.name || 'group';
   const stream = props.server.getStream(props.group.stream_id);
-  const artUrl = stream?.properties.metadata?.artUrl || logo;
-  const title = stream?.properties.metadata?.title || 'Unknown Title';
-  const artist: string = stream?.properties.metadata?.artist
-    ? stream!.properties.metadata.artist.join(', ')
-    : 'Unknown Artist';
-
-  console.debug('Art URL: ' + artUrl);
-
-  const allClients = [];
-  for (const group of props.server.groups) for (const client of group.clients) allClients.push(client);
+  const metadata = stream?.properties.metadata;
+  const title = metadata?.title || 'Unknown Title';
+  const artist = metadata?.artist ? metadata.artist.join(', ') : 'Unknown Artist';
 
   return (
     <div>
@@ -284,30 +204,18 @@ export default function Group(props: GroupProps) {
           flexGrow: 1,
         }}
       >
-        {/* <Stack spacing={2} direction="column" alignItems="center"> */}
         <Stack spacing={0} direction="column" sx={{ alignItems: 'left' }}>
           <Grid container direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <Stack direction="row" sx={{ justifyContent: 'center', alignItems: 'center' }}>
-              <IconButton
-                aria-label="Options"
-                onClick={(event) => {
-                  handleSettingsClicked(event);
-                }}
-              >
+              <IconButton aria-label={'Settings for ' + groupName} onClick={handleSettingsClicked}>
                 <SettingsIcon />
               </IconButton>
 
               <FormControl variant="standard">
                 <Select
-                  id="streamselect"
                   value={props.group.stream_id}
-                  label="Active stream"
                   inputProps={{ 'aria-label': 'Active stream' }}
-                  onChange={(event) => {
-                    const stream: string = event.target.value;
-                    setStreamId(stream);
-                    props.snapcontrol.setStream(props.group.id, stream);
-                  }}
+                  onChange={(event) => props.snapcontrol.setStream(props.group.id, event.target.value)}
                 >
                   {props.server.streams.map((stream) => (
                     <MenuItem key={stream.id} value={stream.id}>
@@ -320,41 +228,21 @@ export default function Group(props: GroupProps) {
 
             {stream?.properties.canControl && (
               <Stack direction="row" sx={{ justifyContent: 'center', alignItems: 'center' }}>
-                <IconButton
-                  aria-label="previous"
-                  onClick={() => {
-                    props.snapcontrol.control(props.group.stream_id, 'previous');
-                  }}
-                >
+                <IconButton aria-label="previous" onClick={() => props.snapcontrol.control(stream.id, 'previous')}>
                   <SkipPreviousIcon />
                 </IconButton>
-                <IconButton
-                  aria-label="play/pause"
-                  onClick={() => {
-                    handlePlayPauseClicked();
-                  }}
-                >
-                  {props.server.getStream(props.group.stream_id)?.properties.playbackStatus === 'playing' ? (
-                    <PauseIcon />
-                  ) : (
-                    <PlayArrowIcon />
-                  )}
-                  {/* sx={{ height: 32, width: 32 }} /> */}
+                <IconButton aria-label="play/pause" onClick={() => handlePlayPauseClicked(stream)}>
+                  {stream.properties.playbackStatus === 'playing' ? <PauseIcon /> : <PlayArrowIcon />}
                 </IconButton>
-                <IconButton
-                  aria-label="next"
-                  onClick={() => {
-                    props.snapcontrol.control(props.group.stream_id, 'next');
-                  }}
-                >
+                <IconButton aria-label="next" onClick={() => props.snapcontrol.control(stream.id, 'next')}>
                   <SkipNextIcon />
                 </IconButton>
               </Stack>
             )}
           </Grid>
-          {stream?.properties.metadata && (
+          {metadata && (
             <Stack spacing={2} direction="row" sx={{ alignItems: 'center' }}>
-              <CardMedia component="img" sx={{ width: 48 }} image={artUrl} alt={title + ' cover'} />
+              <CardMedia component="img" sx={{ width: 48 }} image={metadata.artUrl || logo} alt={title + ' cover'} />
               <Stack spacing={0} direction="column" sx={{ justifyContent: 'center', flexGrow: 1, overflow: 'hidden' }}>
                 <Typography noWrap variant="subtitle1" align="left">
                   {title}
@@ -365,62 +253,52 @@ export default function Group(props: GroupProps) {
               </Stack>
             </Stack>
           )}
-          {groupClients.length > 1 && (
+          {clients.length > 1 && (
             <Stack spacing={2} direction="row" sx={{ alignItems: 'center' }}>
-              <IconButton
-                aria-label="Mute"
-                onClick={() => {
-                  handleMuteClicked();
-                }}
-              >
+              <IconButton aria-label={'Mute ' + groupName} aria-pressed={props.group.muted} onClick={handleMuteClicked}>
                 {props.group.muted ? <VolumeOffIcon /> : <VolumeUpIcon />}
               </IconButton>
               <Slider
-                aria-label="Volume"
+                aria-label={groupName + ' volume'}
                 color="secondary"
                 min={0}
                 max={100}
                 size="small"
-                key={'slider-' + props.group.id}
                 value={getVolume()}
-                onChange={(_, value) => {
-                  handleVolumeChange(value as number);
-                }}
-                onChangeCommitted={(_, value) => {
-                  handleVolumeChangeCommitted(value as number);
+                onChange={(_, value) => handleVolumeChange(value as number)}
+                onChangeCommitted={() => {
+                  volumeDrag.current = null;
                 }}
               />
             </Stack>
           )}
-          {groupClients.length === 1 && <Box sx={{ py: 0.5 }} />}
+          {clients.length === 1 && <Box sx={{ py: 0.5 }} />}
         </Stack>
         <Divider />
         <Box sx={{ py: 0.5 }} />
-        <>{groupClients}</>
+        {clients.map((client) => (
+          <Client
+            key={client.id}
+            client={client}
+            snapcontrol={props.snapcontrol}
+            onDelete={() => handleClientDelete(client)}
+            onVolumeChange={refresh}
+          />
+        ))}
       </Card>
 
-      <Dialog
-        fullWidth
-        open={settingsOpen}
-        onClose={() => {
-          handleSettingsClose(false);
-        }}
-      >
+      <Dialog fullWidth open={settingsOpen} onClose={() => handleSettingsClose(false)}>
         <DialogTitle>Group settings</DialogTitle>
         <DialogContent>
           <Divider textAlign="left">Stream</Divider>
           <TextField
-            // label="Stream"
             margin="dense"
-            id="stream"
             select
             fullWidth
             variant="standard"
-            value={streamId}
-            onChange={(event) => {
-              console.log('SetStream: ' + event.target.value);
-              setStreamId(event.target.value);
-            }}
+            value={settingsStreamId}
+            slotProps={{ htmlInput: { 'aria-label': 'Stream' } }}
+            onChange={(event) => setSettingsStreamId(event.target.value)}
           >
             {props.server.streams.map((stream) => (
               <MenuItem key={stream.id} value={stream.id}>
@@ -430,41 +308,28 @@ export default function Group(props: GroupProps) {
           </TextField>
           <Divider textAlign="left">Clients</Divider>
           <FormGroup>
-            {clients.map((client) => (
+            {settingsClients.map((element) => (
               <FormControlLabel
                 control={
                   <Checkbox
-                    checked={client.inGroup}
-                    key={'cb-' + client.client.id}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      handleGroupClientChange(client.client, e.target.checked);
-                    }}
+                    checked={element.inGroup}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      handleGroupClientChange(element.client, e.target.checked)
+                    }
                   />
                 }
-                label={client.client.getName()}
-                key={'label-' + client.client.id}
+                label={element.client.getName()}
+                key={element.client.id}
               />
             ))}
           </FormGroup>
         </DialogContent>
         <DialogActions>
-          <Button
-            onClick={() => {
-              handleSettingsClose(false);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={() => {
-              handleSettingsClose(true);
-            }}
-          >
-            OK
-          </Button>
+          <Button onClick={() => handleSettingsClose(false)}>Cancel</Button>
+          <Button onClick={() => handleSettingsClose(true)}>OK</Button>
         </DialogActions>
       </Dialog>
-      {snackbar()}
+      {deleteSnackbars}
     </div>
   );
 }

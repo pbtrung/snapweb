@@ -22,13 +22,12 @@ describe('Group', () => {
     );
   }
 
-  // The first "Volume" slider is the group slider, the rest belong to clients
   function groupSlider() {
-    return screen.getAllByRole('slider', { name: 'Volume' })[0];
+    return screen.getByRole('slider', { name: 'group volume' });
   }
 
   function groupMute() {
-    return screen.getAllByRole('button', { name: 'Mute' })[0];
+    return screen.getByRole('button', { name: 'Mute group' });
   }
 
   it('renders its online clients', () => {
@@ -46,12 +45,12 @@ describe('Group', () => {
   it('shows offline clients when asked to, without a group slider for one client', () => {
     renderGroup('g2', true);
     expect(screen.getByText('host-c3')).toBeInTheDocument();
-    expect(screen.getAllByRole('slider', { name: 'Volume' })).toHaveLength(1);
+    expect(screen.getAllByRole('slider', { name: / volume$/ })).toHaveLength(1);
   });
 
   it('shows the average client volume on the group slider', () => {
     renderGroup('g1');
-    expect(screen.getAllByRole('slider', { name: 'Volume' })).toHaveLength(3);
+    expect(screen.getAllByRole('slider', { name: / volume$/ })).toHaveLength(3);
     expect(groupSlider()).toHaveValue('60');
   });
 
@@ -79,6 +78,44 @@ describe('Group', () => {
       ['c2', 90],
     ]);
     expect(groupSlider()).toHaveValue('80');
+  });
+
+  // Drag the group slider through the given values in one gesture
+  function drag(...values: number[]) {
+    // Give the slider a 100px track so pointer positions map 1:1 to values
+    const root = groupSlider().closest('.MuiSlider-root') as HTMLElement;
+    root.getBoundingClientRect = () => ({
+      left: 0,
+      width: 100,
+      top: 0,
+      height: 10,
+      right: 100,
+      bottom: 10,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(root, { clientX: values[0], button: 0 });
+    for (const value of values.slice(1)) fireEvent.pointerMove(document, { clientX: value, buttons: 1 });
+    fireEvent.pointerUp(document, { clientX: values[values.length - 1] });
+  }
+
+  it('keeps volumes finite when a drag starts at 100 and returns to it', () => {
+    for (const client of control.getGroup('g1').clients) client.config.volume.percent = 100;
+    renderGroup('g1');
+    drag(50, 100);
+
+    const sent = requests(ws, 'Client.SetVolume').map((m) => m.params.volume.percent);
+    expect(sent.every(Number.isFinite)).toBe(true);
+    expect(sent.slice(-2)).toEqual([100, 100]);
+  });
+
+  it('raises clients from a group volume of 0', () => {
+    for (const client of control.getGroup('g1').clients) client.config.volume.percent = 0;
+    renderGroup('g1');
+    fireEvent.change(groupSlider(), { target: { value: 50 } });
+
+    expect(requests(ws, 'Client.SetVolume').map((m) => m.params.volume.percent)).toEqual([50, 50]);
   });
 
   it('scales from the volumes at the start of a drag', () => {
@@ -110,7 +147,7 @@ describe('Group', () => {
 
   it('follows client volume changes', () => {
     renderGroup('g1');
-    const clientSlider = screen.getAllByRole('slider', { name: 'Volume' })[1];
+    const clientSlider = screen.getByRole('slider', { name: 'Kitchen volume' });
     fireEvent.change(clientSlider, { target: { value: 0 } });
 
     expect(groupSlider()).toHaveValue('40');
@@ -181,7 +218,7 @@ describe('Group', () => {
 
   describe('settings dialog', () => {
     async function openSettings() {
-      await userEvent.click(screen.getAllByRole('button', { name: 'Options' })[0]);
+      await userEvent.click(screen.getByRole('button', { name: 'Settings for group' }));
       return screen.getByRole('dialog');
     }
 
@@ -242,7 +279,7 @@ describe('Group', () => {
   describe('deleting a client', () => {
     async function deleteOffline() {
       renderGroup('g2', true);
-      await userEvent.click(screen.getAllByRole('button', { name: 'Options' })[1]);
+      await userEvent.click(screen.getByRole('button', { name: 'host-c3 options' }));
       await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
     }
 
@@ -251,6 +288,17 @@ describe('Group', () => {
       expect(screen.getByText('Deleted host-c3')).toBeInTheDocument();
       expect(screen.queryByRole('slider')).not.toBeInTheDocument();
       expect(requests(ws, 'Server.DeleteClient')).toHaveLength(0);
+    });
+
+    it('keeps the client hidden when a server update replaces it', async () => {
+      const { rerender } = renderGroup('g2', true);
+      await userEvent.click(screen.getByRole('button', { name: 'host-c3 options' }));
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+      control.server.fromJson(makeServerStatus());
+      rerender(<Group server={control.server} group={control.getGroup('g2')} snapcontrol={control} showOffline />);
+
+      expect(screen.queryByText('host-c3')).not.toBeInTheDocument();
+      expect(screen.getByText('Deleted host-c3')).toBeInTheDocument();
     });
 
     it('restores the client on undo', async () => {
