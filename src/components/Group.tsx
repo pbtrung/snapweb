@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { useState, useLayoutEffect } from 'react';
+import { useState } from 'react';
 import Client from './Client';
 import logo from '../assets/logo192.png';
 import { SnapControl, Snapcast } from '../snapcontrol';
@@ -33,22 +33,21 @@ export default function Group(props: GroupProps) {
   const [clients, setClients] = useState<GroupClient[]>([]);
   const [streamId, setStreamId] = useState("");
   const [deletedClients, setDeletedClients] = useState<Snapcast.Client[]>([]);
-  const [volume, setVolume] = useState(0);
   const groupVolumeChange = useRef<GroupVolumeChange>({ volumeEntered: true, client_volumes: new Map<string, number>(), group_volume: 0 });
 
-  function updateVolume() {
+  function getVolume(): number {
     const clients = getClients();
     let volume = 0;
     for (const client of clients)
       volume += client.config.volume.percent;
-    volume /= clients.length;
-    setVolume(volume);
+    return volume / clients.length;
   }
 
-  useLayoutEffect(() => {
-    console.debug("useLayoutEffect");
-    updateVolume();
-  });
+  // The client volumes live in the mutable server model, so force a re-render
+  // to pick up the new group volume
+  function updateVolume() {
+    setUpdate(u => u + 1);
+  }
 
   function handleSettingsClicked(_event: React.MouseEvent<HTMLButtonElement>) {
     console.debug("handleSettingsClicked");
@@ -95,12 +94,7 @@ export default function Group(props: GroupProps) {
 
   function handleGroupClientChange(client: Snapcast.Client, inGroup: boolean) {
     console.debug("handleGroupClientChange: " + client.id + ", in group: " + inGroup);
-    const newclients = clients;
-    const idx = newclients.findIndex(element => element.client === client);
-    newclients[idx].inGroup = inGroup;
-    setClients(newclients);
-    // dummy update, since the array was just mutated
-    setUpdate(update + 1);
+    setClients(clients.map(element => element.client === client ? { ...element, inGroup: inGroup } : element));
   }
 
   function handleClientDelete(client: Snapcast.Client) {
@@ -133,8 +127,7 @@ export default function Group(props: GroupProps) {
 
   function handleMuteClicked() {
     console.debug("handleMuteClicked");
-    props.group.muted = !props.group.muted;
-    props.snapcontrol.muteGroup(props.group.id, props.group.muted);
+    props.snapcontrol.muteGroup(props.group.id, !props.group.muted);
     setUpdate(update + 1);
   }
 
@@ -169,7 +162,7 @@ export default function Group(props: GroupProps) {
       props.snapcontrol.setVolume(client.id, new_volume);
     }
 
-    setVolume(value);
+    updateVolume();
   }
 
   function handleVolumeChangeCommitted(value: number) {
@@ -311,7 +304,7 @@ export default function Group(props: GroupProps) {
               <IconButton aria-label="Mute" onClick={() => { handleMuteClicked() }}>
                 {props.group.muted ? <VolumeOffIcon /> : <VolumeUpIcon />}
               </IconButton>
-              <Slider aria-label="Volume" color="secondary" min={0} max={100} size="small" key={"slider-" + props.group.id} value={volume} onChange={(_, value) => { handleVolumeChange(value as number) }} onChangeCommitted={(_, value) => { handleVolumeChangeCommitted(value as number) }} />
+              <Slider aria-label="Volume" color="secondary" min={0} max={100} size="small" key={"slider-" + props.group.id} value={getVolume()} onChange={(_, value) => { handleVolumeChange(value as number) }} onChangeCommitted={(_, value) => { handleVolumeChangeCommitted(value as number) }} />
             </Stack>
           }
           {groupClients.length === 1 &&

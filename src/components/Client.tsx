@@ -25,7 +25,6 @@ export default function Client(props: ClientProps) {
 
   function handleVolumeChange(value: number) {
     console.debug("handleVolumeChange: " + value);
-    props.client.config.volume.percent = value;
     props.snapcontrol.setVolume(props.client.id, value, false);
     // setState({});
     props.onVolumeChange();
