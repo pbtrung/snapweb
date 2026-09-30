@@ -866,6 +866,7 @@ class SnapStream {
     socket.binaryType = 'arraybuffer';
     socket.onmessage = (ev) => this.onMessage(ev);
     socket.onopen = () => {
+      console.info('Stream connected to ' + this.baseUrl);
       const hello = new HelloMessage();
       hello.mac = '00:00:00:00:00:00';
       hello.arch = 'web';
@@ -880,6 +881,7 @@ class SnapStream {
       console.error('Stream connection error:', ev);
     };
     socket.onclose = () => {
+      console.info('Stream disconnected, reconnecting in ' + RECONNECT_DELAY_MS + ' ms');
       this.stopSync();
       this.reconnectHandle = window.setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
     };
@@ -914,6 +916,7 @@ class SnapStream {
     this.decoder?.dispose();
     this.stream = undefined;
 
+    console.info('Codec: ' + codec.codec);
     this.decoder = createDecoder(codec.codec);
     if (!this.decoder) {
       alert('Codec not supported: ' + codec.codec);
@@ -926,6 +929,7 @@ class SnapStream {
       this.decoder = undefined;
       return;
     }
+    console.info('Sample format: ' + sampleFormat.toString() + ' (rate:bits:channels)');
     this.sampleFormat = sampleFormat;
     this.bufferFrameCount = Math.floor(BUFFER_DURATION_MS * sampleFormat.msRate());
 

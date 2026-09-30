@@ -349,6 +349,7 @@ class SnapControl {
       this.connection = connection;
       connection.onmessage = (msg: MessageEvent) => this.onMessage(msg.data);
       connection.onopen = () => {
+        console.info('Control connected to ' + baseUrl);
         this.status_req_id = this.sendRequest('Server.GetStatus');
         this.onConnectionChanged?.(this, true);
       };
@@ -356,6 +357,7 @@ class SnapControl {
         console.error('Control connection error:', ev);
       };
       connection.onclose = () => {
+        console.info('Control disconnected, reconnecting in ' + RECONNECT_DELAY_MS + ' ms');
         this.onConnectionChanged?.(this, false, 'Connection lost, trying to reconnect.');
         this.timer = setTimeout(() => this.connect(baseUrl), RECONNECT_DELAY_MS);
       };
@@ -412,6 +414,7 @@ class SnapControl {
         this.getStream(params.id).fromJson(params.stream);
         break;
       case 'Stream.OnProperties':
+        console.info('Stream ' + params.id + ' metadata:', params.properties?.metadata);
         this.getStream(params.id).properties.fromJson(params.properties);
         break;
       case 'Server.OnUpdate':
@@ -533,6 +536,8 @@ class SnapControl {
       // Responses only matter when they carry the server status
       if (json_msg.id !== this.status_req_id) return;
       this.server = new Snapcast.Server(json_msg.result.server);
+      for (const stream of this.server.streams)
+        console.info('Stream ' + stream.id + ' metadata:', stream.properties.metadata);
     } else {
       for (const notification of Array.isArray(json_msg) ? json_msg : [json_msg]) {
         try {
