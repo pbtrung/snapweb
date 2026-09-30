@@ -18,9 +18,6 @@ vi.mock('../../src/snapstream', () => ({
       snapStream.created.push(baseUrl);
     }
     stop = snapStream.stop;
-    static getClientId() {
-      return 'this-browser';
-    }
   },
 }));
 
@@ -189,6 +186,7 @@ describe('SnapWeb', () => {
 
     // Make this browser the client c1 of group g1, which plays stream s1
     function statusWithThisBrowser() {
+      window.localStorage.setItem('uniqueId', 'this-browser');
       const status = makeServerStatus();
       status.groups[0].clients[0].id = 'this-browser';
       return status;
@@ -273,6 +271,18 @@ describe('SnapWeb', () => {
       connect();
       expect(session.metadata).toBeNull();
     });
+  });
+
+  it('does not start the stream when stopped before the audio code loaded', async () => {
+    let resolvePlay!: () => void;
+    vi.mocked(HTMLMediaElement.prototype.play).mockReturnValue(new Promise<void>(resolve => { resolvePlay = resolve; }));
+    render(<SnapWeb />);
+    connect();
+    await userEvent.click(screen.getByTestId('PlayArrowIcon').closest('button')!);
+    await userEvent.click(screen.getByTestId('StopIcon').closest('button')!);
+    await act(async () => { resolvePlay(); });
+
+    expect(snapStream.created).toEqual([]);
   });
 
   it('does not add color scheme listeners on re-render and removes them on unmount', () => {

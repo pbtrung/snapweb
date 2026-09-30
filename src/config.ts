@@ -30,6 +30,26 @@ function getPersistentValue(key: string, defaultValue: string = ""): string {
   return defaultValue;
 }
 
+function uuidv4(): string {
+  // crypto.randomUUID is only available in secure contexts (https/localhost)
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // fall through to the Math.random based implementation
+    }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : ((r & 0x3) | 0x8);
+    return v.toString(16);
+  });
+}
+
+// The id this browser registers with on the audio stream, created once
+function getClientId(): string {
+  return getPersistentValue("uniqueId", uuidv4());
+}
+
 const config = {
   get baseUrl() {
     return getPersistentValue(keys.snapserver_host, (window.location.protocol === "https:" ? "wss://" : "ws://") + host);
@@ -52,4 +72,4 @@ const config = {
 };
 
 
-export { config, getPersistentValue, setPersistentValue, Theme };
+export { config, getClientId, getPersistentValue, setPersistentValue, Theme };

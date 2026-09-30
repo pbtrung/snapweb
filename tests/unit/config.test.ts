@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { config, getPersistentValue, setPersistentValue, Theme } from '../../src/config';
+import { config, getClientId, getPersistentValue, setPersistentValue, Theme } from '../../src/config';
 
 describe('config', () => {
   beforeEach(() => {
@@ -37,5 +37,12 @@ describe('config', () => {
     config.showOffline = true;
     expect(config.showOffline).toBe(true);
     expect(window.localStorage.getItem('showoffline')).toBe('true');
+  });
+
+  it('creates the client id once and keeps it', () => {
+    const id = getClientId();
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(getClientId()).toBe(id);
+    expect(window.localStorage.getItem('uniqueId')).toBe(id);
   });
 });

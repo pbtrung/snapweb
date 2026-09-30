@@ -8,6 +8,22 @@ export default defineConfig({
     host: "127.0.0.1",
   },
   base: './',
+  build: {
+    rolldownOptions: {
+      output: {
+        // Keep the large vendor libraries in their own, separately cached chunks
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            // Only needed for local playback, and loaded along with snapstream
+            { name: 'flac', test: /node_modules[\\/]libflacjs[\\/]/ },
+            { name: 'audio', test: /node_modules[\\/](standardized-audio-context|automation-events|opus-decoder|@wasm-audio-decoders|@eshaz)[\\/]/ },
+            { name: 'mui', test: /node_modules[\\/](@mui|@emotion|@babel[\\/]runtime|stylis|react-is|react-transition-group|prop-types|clsx)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
   plugins: [react(),
   VitePWA({
     registerType: 'autoUpdate',

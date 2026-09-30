@@ -3,9 +3,9 @@ import Server from './Server';
 import AboutDialog from './AboutDialog';
 import SettingsDialog from './Settings';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { Theme, config } from "../config";
+import { Theme, config, getClientId } from "../config";
 import { SnapControl, Snapcast } from '../snapcontrol';
-import { SnapStream } from '../snapstream';
+import type { SnapStream } from '../snapstream';
 import { AppBar, Box, Drawer, List, ListItem, ListItemButton, ListItemText, Toolbar, Typography, IconButton, Snackbar, Alert, Button } from '@mui/material';
 import { PlayArrow as PlayArrowIcon, Stop as StopIcon, Menu as MenuIcon } from '@mui/icons-material';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
@@ -138,7 +138,7 @@ export default function SnapWeb() {
 
   function getMyStreamId(): string {
     try {
-      const group = snapControl.getGroupFromClient(SnapStream.getClientId());
+      const group = snapControl.getGroupFromClient(getClientId());
       return snapControl.getStream(group.stream_id).id;
     } catch {
       return "";
@@ -283,11 +283,14 @@ export default function SnapWeb() {
       console.debug("isPlaying changed to true");
       audioRef.current.src = silence;
       audioRef.current.loop = true;
-      audioRef.current.play().then(() => {
-        snapstreamRef.current = new SnapStream(config.baseUrl);
+      // The audio stream and its decoders are loaded on first use, which
+      // keeps them out of the initial bundle
+      let cancelled = false;
+      Promise.all([audioRef.current.play(), import('../snapstream')]).then(([, { SnapStream }]) => {
+        if (!cancelled)
+          snapstreamRef.current = new SnapStream(config.baseUrl);
       });
-      //   updateMediaSession();
-      // });
+      return () => { cancelled = true; };
     } else {
       console.debug("isPlaying changed to false");
       if (snapstreamRef.current)
