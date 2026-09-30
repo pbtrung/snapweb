@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HelloMessage, JsonMessage, SnapStream, TimeMessage, TimeProvider, Tv } from '../../src/snapstream';
+import { AudioStream, HelloMessage, JsonMessage, SampleFormat, SnapStream, TimeMessage, TimeProvider, Tv } from '../../src/snapstream';
 
 describe('Tv', () => {
   it('converts to and from milliseconds', () => {
@@ -55,15 +55,30 @@ describe('TimeMessage', () => {
   it('round-trips the latency and header timestamps', () => {
     const msg = new TimeMessage();
     msg.id = 7;
+    msg.refersTo = 3;
     msg.sent = new Tv(10, 20);
+    msg.received = new Tv(30, 40);
     msg.latency = new Tv(1, 500000);
     const parsed = new TimeMessage(msg.serialize());
 
     expect(parsed.type).toBe(4);
     expect(parsed.id).toBe(7);
+    expect(parsed.refersTo).toBe(3);
     expect(parsed.latency).toEqual(new Tv(1, 500000));
-    // serialize writes sent first, deserialize reads it into received
-    expect(parsed.received).toEqual(new Tv(10, 20));
+    expect(parsed.sent).toEqual(new Tv(10, 20));
+    expect(parsed.received).toEqual(new Tv(30, 40));
+  });
+
+  it('reads the header in Snapcast wire order: sent, then received', () => {
+    const buffer = new ArrayBuffer(34);
+    const view = new DataView(buffer);
+    view.setUint16(0, 4, true);
+    view.setInt32(6, 5, true);
+    view.setInt32(14, 6, true);
+    const parsed = new TimeMessage(buffer);
+
+    expect(parsed.sent.sec).toBe(5);
+    expect(parsed.received.sec).toBe(6);
   });
 });
 
@@ -91,26 +106,70 @@ describe('TimeProvider', () => {
     expect(provider.diff).toBe(100);
   });
 
-  it('resets while the clock is not running', () => {
+  it('ignores samples while the clock is not running, keeping earlier ones', () => {
     const provider = new TimeProvider();
     const now = vi.spyOn(provider, 'now').mockReturnValue(1000);
     provider.setDiff(20, 0);
     expect(provider.diff).toBe(10);
 
     now.mockReturnValue(0);
+    expect(provider.isRunning()).toBe(false);
     provider.setDiff(40, 0);
-    expect(provider.diff).toBe(0);
-    expect(provider.diffBuffer).toHaveLength(0);
+    expect(provider.diff).toBe(10);
+    expect(provider.diffBuffer).toEqual([10]);
   });
 
-  it('prefers the audio output timestamp over currentTime', () => {
+  it('uses the audio context clock that buffers are scheduled on', () => {
     const provider = new TimeProvider();
+    // getOutputTimestamp would already include the output latency
     provider.setAudioContext({ currentTime: 2, getOutputTimestamp: () => ({ contextTime: 1.5 }) } as any);
-    expect(provider.now()).toBe(1500);
-
-    provider.setAudioContext({ currentTime: 2 } as any);
     expect(provider.now()).toBe(2000);
     expect(provider.nowSec()).toBe(2);
+  });
+
+  it('falls back to performance.now without an audio context', () => {
+    vi.spyOn(window.performance, 'now').mockReturnValue(1234);
+    expect(new TimeProvider().now()).toBe(1234);
+  });
+
+  it('is synced after three samples', () => {
+    const provider = new TimeProvider();
+    vi.spyOn(provider, 'now').mockReturnValue(1000);
+    provider.setDiff(2, 0);
+    provider.setDiff(2, 0);
+    expect(provider.isSynced()).toBe(false);
+    provider.setDiff(2, 0);
+    expect(provider.isSynced()).toBe(true);
+  });
+
+  it('only uses replies to tracked requests, once', () => {
+    const provider = new TimeProvider();
+    vi.spyOn(provider, 'now').mockReturnValue(1000);
+    provider.trackRequest(5);
+
+    expect(provider.handleReply(6, 20, 0)).toBe(false);
+    expect(provider.handleReply(5, 20, 0)).toBe(true);
+    expect(provider.handleReply(5, 40, 0)).toBe(false);
+    expect(provider.diffBuffer).toEqual([10]);
+  });
+
+  it('matches request ids the way they wrap on the wire', () => {
+    const provider = new TimeProvider();
+    vi.spyOn(provider, 'now').mockReturnValue(1000);
+    provider.trackRequest(65536 + 7);
+    expect(provider.handleReply(7, 20, 0)).toBe(true);
+  });
+
+  it('drops replies to requests sent on the previous clock', () => {
+    const provider = new TimeProvider();
+    vi.spyOn(provider, 'now').mockReturnValue(1000);
+    provider.trackRequest(1);
+    provider.setDiff(20, 0);
+
+    provider.setAudioContext({ currentTime: 1 } as any);
+    expect(provider.diffBuffer).toEqual([]);
+    expect(provider.isSynced()).toBe(false);
+    expect(provider.handleReply(1, 20, 0)).toBe(false);
   });
 });
 
@@ -126,5 +185,26 @@ describe('SnapStream.getClientId', () => {
     window.localStorage.clear();
     vi.stubGlobal('crypto', {});
     expect(SnapStream.getClientId()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+});
+
+describe('AudioStream', () => {
+  function fakeBuffer(frames: number) {
+    const channels = [new Float32Array(frames).fill(1), new Float32Array(frames).fill(1)];
+    return { length: frames, getChannelData: (i: number) => channels[i], channels };
+  }
+
+  it('plays silence and keeps its chunks until the clock is synced', () => {
+    const provider = new TimeProvider();
+    const stream = new AudioStream(provider, new SampleFormat(), 1000);
+    const chunk = { startMs: () => 0 } as any;
+    stream.chunks.push(chunk);
+    const buffer = fakeBuffer(4);
+    stream.getNextBuffer(buffer as any, 5000);
+
+    expect(Array.from(buffer.channels[0])).toEqual([0, 0, 0, 0]);
+    expect(Array.from(buffer.channels[1])).toEqual([0, 0, 0, 0]);
+    expect(stream.chunks).toEqual([chunk]);
+    expect(stream.chunk).toBeUndefined();
   });
 });

@@ -13,7 +13,6 @@ declare global {
 
 // declare AudioContext.outputLatency for the ts compiler
 interface IAudioContextPatched extends IAudioContext {
-    readonly getOutputTimestamp?: () => AudioTimestamp;
     readonly outputLatency: number;
 }
 
@@ -60,8 +59,8 @@ class BaseMessage {
         this.type = view.getUint16(0, true);
         this.id = view.getUint16(2, true);
         this.refersTo = view.getUint16(4, true);
-        this.received = new Tv(view.getInt32(6, true), view.getInt32(10, true));
-        this.sent = new Tv(view.getInt32(14, true), view.getInt32(18, true));
+        this.sent = new Tv(view.getInt32(6, true), view.getInt32(10, true));
+        this.received = new Tv(view.getInt32(14, true), view.getInt32(18, true));
         this.size = view.getUint32(22, true);
     }
 
@@ -366,6 +365,13 @@ class AudioStream {
     }
 
     getNextBuffer(buffer: IAudioBuffer, playTimeMs: number) {
+        if (!this._timeProvider.isSynced()) {
+            // Without a server time we can't tell which chunk is due, so play
+            // silence instead of dropping or skipping chunks
+            buffer.getChannelData(0).fill(0);
+            buffer.getChannelData(1).fill(0);
+            return;
+        }
         if (!this.chunk) {
             this.chunk = this.chunks.shift()
         }
@@ -536,18 +542,43 @@ class TimeProvider {
     reset() {
         this.diffBuffer.length = 0;
         this.diff = 0;
+        // Replies to requests sent before now were measured on another clock
+        this.pendingRequests.clear();
+    }
+
+    // Remember a time request, so only its reply is used for this clock
+    trackRequest(id: number) {
+        if (this.pendingRequests.size > 100)
+            this.pendingRequests.clear();
+        this.pendingRequests.add(id & 0xffff);
+    }
+
+    // Use a time reply if it answers a request sent on the current clock
+    handleReply(refersTo: number, c2s: number, s2c: number): boolean {
+        if (!this.pendingRequests.delete(refersTo))
+            return false;
+        this.setDiff(c2s, s2c);
+        return true;
+    }
+
+    // Enough samples for the median to ignore a single outlier
+    isSynced(): boolean {
+        return this.diffBuffer.length >= 3;
+    }
+
+    // The audio clock reads 0 until it runs, which makes samples meaningless
+    isRunning(): boolean {
+        return this.now() !== 0;
     }
 
     setDiff(c2s: number, s2c: number) {
-        if (this.now() === 0) {
-            this.reset()
-        } else {
-            if (this.diffBuffer.push((c2s - s2c) / 2) > 100)
-                this.diffBuffer.shift();
-            const sorted = [...this.diffBuffer];
-            sorted.sort((a, b) => a - b);
-            this.diff = sorted[Math.floor(sorted.length / 2)];
-        }
+        if (!this.isRunning())
+            return;
+        if (this.diffBuffer.push((c2s - s2c) / 2) > 100)
+            this.diffBuffer.shift();
+        const sorted = [...this.diffBuffer];
+        sorted.sort((a, b) => a - b);
+        this.diff = sorted[Math.floor(sorted.length / 2)];
         // console.debug("c2s: " + c2s.toFixed(2) + ", s2c: " + s2c.toFixed(2) + ", diff: " + this.diff.toFixed(2) + ", now: " + this.now().toFixed(2) + ", server.now: " + this.serverNow().toFixed(2) + ", win.now: " + window.performance.now().toFixed(2));
         // console.log("now: " + this.now() + "\t" + this.now() + "\t" + this.now());
     }
@@ -555,12 +586,11 @@ class TimeProvider {
     now() {
         if (!this.ctx) {
             return window.performance.now();
-        } else {
-            const ctx = this.ctx as IAudioContextPatched;
-            // Use the more accurate getOutputTimestamp if available, fallback to ctx.currentTime otherwise.
-            const contextTime = ctx.getOutputTimestamp ? ctx.getOutputTimestamp().contextTime : undefined;
-            return (contextTime !== undefined ? contextTime : ctx.currentTime) * 1000;
         }
+        // Use currentTime, the clock buffers are scheduled on. The output
+        // latency is added once when scheduling. getOutputTimestamp() would
+        // already include it, counting it twice.
+        return this.ctx.currentTime * 1000;
     }
 
     nowSec() {
@@ -577,6 +607,7 @@ class TimeProvider {
 
     diffBuffer: Array<number> = new Array<number>();
     diff: number = 0;
+    pendingRequests: Set<number> = new Set<number>();
     ctx?: AudioContext;
 }
 
@@ -916,6 +947,7 @@ class SnapStream {
         this.streamsocket.onerror = (ev) => { console.error('error:', ev); };
         this.streamsocket.onclose = () => {
             window.clearInterval(this.syncHandle);
+            this.clearSyncBurst();
             console.info('connection lost, reconnecting in 1s');
             setTimeout(() => this.connect(), 1000);
         }
@@ -959,6 +991,7 @@ class SnapStream {
 
                     this.ctx.resume();
                     this.timeProvider.setAudioContext(this.ctx);
+                    this.syncBurst();
                     this.gainNode.gain.value = this.serverSettings!.muted ? 0 : this.serverSettings!.volumePercent / 100;
                     // this.timeProvider = new TimeProvider(this.ctx);
                     this.stream = new AudioStream(this.timeProvider, this.sampleFormat, this.bufferMs);
@@ -987,7 +1020,7 @@ class SnapStream {
         } else if (type === 4) {
             if (this.timeProvider) {
                 const time = new TimeMessage(msg.data);
-                this.timeProvider.setDiff(time.latency.getMilliseconds(), this.timeProvider.now() - time.sent.getMilliseconds());
+                this.timeProvider.handleReply(time.refersTo, time.latency.getMilliseconds(), this.timeProvider.now() - time.sent.getMilliseconds());
             }
             // console.log("Time sec: " + time.latency.sec + ", usec: " + time.latency.usec + ", diff: " + this.timeProvider.diff);
         } else {
@@ -1005,10 +1038,26 @@ class SnapStream {
     }
 
     private syncTime() {
+        // A request sent before the audio clock runs would carry a 0 timestamp
+        if (!this.timeProvider.isRunning())
+            return;
         const t = new TimeMessage();
         t.latency.setMilliseconds(this.timeProvider.now());
         this.sendMessage(t);
+        this.timeProvider.trackRequest(t.id);
         // console.log("prepareSource median: " + Math.round(this.median * 10) / 10);
+    }
+
+    // Sync quickly after switching clocks instead of waiting for the 1s timer
+    private syncBurst() {
+        this.clearSyncBurst();
+        for (let i = 0; i < 10; ++i)
+            this.syncBurstHandles.push(window.setTimeout(() => this.syncTime(), i * 25));
+    }
+
+    private clearSyncBurst() {
+        this.syncBurstHandles.forEach(handle => window.clearTimeout(handle));
+        this.syncBurstHandles = [];
     }
 
     private stopAudio() {
@@ -1028,6 +1077,7 @@ class SnapStream {
 
     public stop() {
         window.clearInterval(this.syncHandle);
+        this.clearSyncBurst();
         this.stopAudio();
         if (this.streamsocket.readyState === WebSocket.OPEN || this.streamsocket.readyState === WebSocket.CONNECTING) {
             this.streamsocket.onclose = () => { };
@@ -1068,6 +1118,7 @@ class SnapStream {
     bufferDurationMs: number = 80; // 0;
     bufferFrameCount: number = 3844; // 9600; // 2400;//8192;
     syncHandle: number = -1;
+    syncBurstHandles: number[] = [];
     // ageBuffer: Array<number>;
     audioBuffers: Array<PlayBuffer> = new Array<PlayBuffer>();
     freeBuffers: Array<IAudioBuffer> = new Array<IAudioBuffer>();
@@ -1089,4 +1140,4 @@ class SnapStream {
 }
 
 export { SnapStream }
-export { JsonMessage, HelloMessage, TimeMessage, TimeProvider, Tv }
+export { AudioStream, JsonMessage, HelloMessage, SampleFormat, TimeMessage, TimeProvider, Tv }
