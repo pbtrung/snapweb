@@ -7,7 +7,35 @@ import {
   IAudioBufferSourceNode,
   IGainNode,
 } from 'standardized-audio-context';
-import { OpusDecoder as WasmOpusDecoder } from 'opus-decoder';
+import { OpusDecoder as WasmOpusDecoder, OpusDecoderSampleRate } from 'opus-decoder';
+
+// Snapcast binary protocol: every message starts with a 26 byte header
+const HEADER_SIZE = 26;
+
+enum MessageType {
+  CodecHeader = 1,
+  WireChunk = 2,
+  ServerSettings = 3,
+  Time = 4,
+  Hello = 5,
+}
+
+// Playback
+const BUFFER_DURATION_MS = 80; // length of each scheduled audio buffer
+const AUDIO_BUFFER_COUNT = 3; // buffers in flight
+const PLAY_START_DELAY_S = 0.1; // headroom before the first buffer plays
+const HARD_SYNC_THRESHOLD_MS = 5; // beyond this, seek instead of adjusting frames
+const SOFT_SYNC_THRESHOLD_MS = 0.1; // below this, play as is
+const MAX_CHUNK_AGE_MS = 5000; // beyond the server buffer, chunks are dropped
+
+// Time sync
+const SYNC_INTERVAL_MS = 1000;
+const SYNC_BURST_COUNT = 10; // requests sent right after the audio clock starts
+const SYNC_BURST_SPACING_MS = 25;
+const SYNC_WINDOW = 100; // offsets the median is taken over
+const SYNC_MIN_SAMPLES = 3; // enough for the median to ignore one outlier
+
+const RECONNECT_DELAY_MS = 1000;
 
 declare global {
   // declare window.webkitAudioContext for the ts compiler
@@ -67,7 +95,7 @@ class BaseMessage {
   }
 
   serialize(): ArrayBuffer {
-    this.size = 26 + this.getSize();
+    this.size = HEADER_SIZE + this.getSize();
     const buffer = new ArrayBuffer(this.size);
     const view = new DataView(buffer);
     view.setUint16(0, this.type, true);
@@ -96,49 +124,43 @@ class BaseMessage {
 class CodecMessage extends BaseMessage {
   constructor(buffer?: ArrayBuffer) {
     super();
-    this.payload = new ArrayBuffer(0);
-    if (buffer) {
-      this.deserialize(buffer);
-    }
-    this.type = 1;
+    if (buffer) this.deserialize(buffer);
+    this.type = MessageType.CodecHeader;
   }
 
   deserialize(buffer: ArrayBuffer) {
     super.deserialize(buffer);
     const view = new DataView(buffer);
-    const codecSize = view.getInt32(26, true);
-    const decoder = new TextDecoder('utf-8');
-    this.codec = decoder.decode(buffer.slice(30, 30 + codecSize));
-    const payloadSize = view.getInt32(30 + codecSize, true);
-    console.debug('payload size: ' + payloadSize);
-    this.payload = buffer.slice(34 + codecSize, 34 + codecSize + payloadSize);
-    console.debug('payload: ' + this.payload);
+    const codecSize = view.getUint32(HEADER_SIZE, true);
+    const codecStart = HEADER_SIZE + 4;
+    this.codec = new TextDecoder('utf-8').decode(buffer.slice(codecStart, codecStart + codecSize));
+    const payloadSize = view.getUint32(codecStart + codecSize, true);
+    const payloadStart = codecStart + codecSize + 4;
+    this.payload = buffer.slice(payloadStart, payloadStart + payloadSize);
   }
 
   codec: string = '';
-  payload: ArrayBuffer;
+  payload: ArrayBuffer = new ArrayBuffer(0);
 }
 
 class TimeMessage extends BaseMessage {
   constructor(buffer?: ArrayBuffer) {
     super();
-    if (buffer) {
-      this.deserialize(buffer);
-    }
-    this.type = 4;
+    if (buffer) this.deserialize(buffer);
+    this.type = MessageType.Time;
   }
 
   deserialize(buffer: ArrayBuffer) {
     super.deserialize(buffer);
     const view = new DataView(buffer);
-    this.latency = new Tv(view.getInt32(26, true), view.getInt32(30, true));
+    this.latency = new Tv(view.getInt32(HEADER_SIZE, true), view.getInt32(HEADER_SIZE + 4, true));
   }
 
   serialize(): ArrayBuffer {
     const buffer = super.serialize();
     const view = new DataView(buffer);
-    view.setInt32(26, this.latency.sec, true);
-    view.setInt32(30, this.latency.usec, true);
+    view.setInt32(HEADER_SIZE, this.latency.sec, true);
+    view.setInt32(HEADER_SIZE + 4, this.latency.usec, true);
     return buffer;
   }
 
@@ -152,48 +174,41 @@ class TimeMessage extends BaseMessage {
 class JsonMessage extends BaseMessage {
   constructor(buffer?: ArrayBuffer) {
     super();
-    if (buffer) {
-      this.deserialize(buffer);
-    }
+    // Subclasses parse in their own constructor, after their fields are
+    // initialized; parsing here would be overwritten by those initializers
+    if (buffer && new.target === JsonMessage) this.deserialize(buffer);
   }
 
   deserialize(buffer: ArrayBuffer) {
     super.deserialize(buffer);
-    const view = new DataView(buffer);
-    const size = view.getUint32(26, true);
-    const decoder = new TextDecoder();
-    this.json = JSON.parse(decoder.decode(buffer.slice(30, 30 + size)));
+    const size = new DataView(buffer).getUint32(HEADER_SIZE, true);
+    this.json = JSON.parse(new TextDecoder().decode(buffer.slice(HEADER_SIZE + 4, HEADER_SIZE + 4 + size)));
   }
 
   serialize(): ArrayBuffer {
+    // The size is the UTF-8 byte length, not the UTF-16 string length,
+    // otherwise non-ASCII payloads get truncated
+    this.encoded = new TextEncoder().encode(JSON.stringify(this.json));
     const buffer = super.serialize();
-    const view = new DataView(buffer);
-    const encoder = new TextEncoder();
-    const encoded = encoder.encode(JSON.stringify(this.json));
-    // The size is the UTF-8 byte length (as in getSize()), not the UTF-16
-    // string length, otherwise non-ASCII payloads get truncated
-    view.setUint32(26, encoded.length, true);
-    for (let i = 0; i < encoded.length; ++i) view.setUint8(30 + i, encoded[i]);
+    new DataView(buffer).setUint32(HEADER_SIZE, this.encoded.length, true);
+    new Uint8Array(buffer, HEADER_SIZE + 4).set(this.encoded);
     return buffer;
   }
 
   getSize() {
-    const encoder = new TextEncoder();
-    const encoded = encoder.encode(JSON.stringify(this.json));
-    return encoded.length + 4;
-    // return JSON.stringify(this.json).length;
+    this.encoded ??= new TextEncoder().encode(JSON.stringify(this.json));
+    return this.encoded.length + 4;
   }
 
   json: any;
+  private encoded?: Uint8Array;
 }
 
 class HelloMessage extends JsonMessage {
   constructor(buffer?: ArrayBuffer) {
     super(buffer);
-    if (buffer) {
-      this.deserialize(buffer);
-    }
-    this.type = 5;
+    if (buffer) this.deserialize(buffer);
+    this.type = MessageType.Hello;
   }
 
   deserialize(buffer: ArrayBuffer) {
@@ -238,10 +253,8 @@ class HelloMessage extends JsonMessage {
 class ServerSettingsMessage extends JsonMessage {
   constructor(buffer?: ArrayBuffer) {
     super(buffer);
-    if (buffer) {
-      this.deserialize(buffer);
-    }
-    this.type = 3;
+    if (buffer) this.deserialize(buffer);
+    this.type = MessageType.ServerSettings;
   }
 
   deserialize(buffer: ArrayBuffer) {
@@ -263,32 +276,30 @@ class ServerSettingsMessage extends JsonMessage {
   muted: boolean = false;
 }
 
+// A wire chunk: a timestamp and encoded audio, which the decoder replaces
+// with PCM in place
 class PcmChunkMessage extends BaseMessage {
   constructor(buffer: ArrayBuffer, sampleFormat: SampleFormat) {
     super();
     this.deserialize(buffer);
     this.sampleFormat = sampleFormat;
-    this.type = 2;
+    this.type = MessageType.WireChunk;
   }
 
   deserialize(buffer: ArrayBuffer) {
     super.deserialize(buffer);
     const view = new DataView(buffer);
-    this.timestamp = new Tv(view.getInt32(26, true), view.getInt32(30, true));
-    // this.payloadSize = view.getUint32(34, true);
-    this.payload = buffer.slice(38); //, this.payloadSize + 38));// , this.payloadSize);
-    // console.log("ts: " + this.timestamp.sec + " " + this.timestamp.usec + ", payload: " + this.payloadSize + ", len: " + this.payload.byteLength);
+    this.timestamp = new Tv(view.getInt32(HEADER_SIZE, true), view.getInt32(HEADER_SIZE + 4, true));
+    // The payload size field at HEADER_SIZE + 8 is followed by the payload
+    this.payload = buffer.slice(HEADER_SIZE + 12);
   }
 
   readFrames(frames: number): ArrayBuffer {
-    let frameCnt = frames;
     const frameSize = this.sampleFormat.frameSize();
-    if (this.idx + frames > this.payloadSize() / frameSize) frameCnt = this.payloadSize() / frameSize - this.idx;
+    const frameCnt = Math.min(frames, this.getFrameCount() - this.idx);
     const begin = this.idx * frameSize;
     this.idx += frameCnt;
-    const end = begin + frameCnt * frameSize;
-    // console.log("readFrames: " + frames + ", result: " + frameCnt + ", begin: " + begin + ", end: " + end + ", payload: " + this.payload.byteLength);
-    return this.payload.slice(begin, end);
+    return this.payload.slice(begin, begin + frameCnt * frameSize);
   }
 
   getFrameCount(): number {
@@ -299,10 +310,12 @@ class PcmChunkMessage extends BaseMessage {
     return this.idx >= this.getFrameCount();
   }
 
+  // Server time of the next unread frame
   startMs(): number {
     return this.timestamp.getMilliseconds() + 1000 * (this.idx / this.sampleFormat.rate);
   }
 
+  // Duration of the unread frames
   duration(): number {
     return 1000 * ((this.getFrameCount() - this.idx) / this.sampleFormat.rate);
   }
@@ -316,26 +329,20 @@ class PcmChunkMessage extends BaseMessage {
   }
 
   addPayload(buffer: ArrayBuffer) {
-    const payload = new ArrayBuffer(this.payload.byteLength + buffer.byteLength);
-    const view = new DataView(payload);
-    const viewOld = new DataView(this.payload);
-    const viewNew = new DataView(buffer);
-    for (let i = 0; i < viewOld.byteLength; ++i) {
-      view.setInt8(i, viewOld.getInt8(i));
-    }
-    for (let i = 0; i < viewNew.byteLength; ++i) {
-      view.setInt8(i + viewOld.byteLength, viewNew.getInt8(i));
-    }
-    this.payload = payload;
+    const payload = new Uint8Array(this.payload.byteLength + buffer.byteLength);
+    payload.set(new Uint8Array(this.payload));
+    payload.set(new Uint8Array(buffer), this.payload.byteLength);
+    this.payload = payload.buffer;
   }
 
   timestamp: Tv = new Tv(0, 0);
-  // payloadSize: number = 0;
   payload: ArrayBuffer = new ArrayBuffer(0);
   idx: number = 0;
   sampleFormat: SampleFormat;
 }
 
+// Queues decoded chunks and fills audio buffers from them, in sync with the
+// server clock
 class AudioStream {
   constructor(
     public _timeProvider: TimeProvider,
@@ -344,31 +351,42 @@ class AudioStream {
   ) {}
 
   chunks: Array<PcmChunkMessage> = new Array<PcmChunkMessage>();
-
-  setVolume(percent: number, muted: boolean) {
-    // let base = 10;
-    this.volume = percent / 100; // (Math.pow(base, percent / 100) - 1) / (base - 1);
-    console.log('setVolume: ' + percent + ' => ' + this.volume + ', muted: ' + this.muted);
-    this.muted = muted;
-  }
+  chunk?: PcmChunkMessage = undefined;
 
   addChunk(chunk: PcmChunkMessage) {
     this.chunks.push(chunk);
-    // let oldest = this.timeProvider.serverNow() - this.chunks[0].timestamp.getMilliseconds();
-    // let newest = this.timeProvider.serverNow() - this.chunks[this.chunks.length - 1].timestamp.getMilliseconds();
-    // console.debug("chunks: " + this.chunks.length + ", oldest: " + oldest.toFixed(2) + ", newest: " + newest.toFixed(2));
-
+    // Before the clock is synced the server time is unknown, so bound the
+    // queue relative to the newest chunk instead
+    const newestMs = chunk.timestamp.getMilliseconds();
     while (this.chunks.length > 0) {
-      const age = this._timeProvider.serverNow() - this.chunks[0].timestamp.getMilliseconds();
-      // todo: consider buffer ms
-      if (age > 5000 + this._bufferMs) {
-        this.chunks.shift();
-        console.log('Dropping old chunk: ' + age.toFixed(2) + ', left: ' + this.chunks.length);
-      } else break;
+      const reference = this._timeProvider.isSynced() ? this._timeProvider.serverNow() : newestMs;
+      if (reference - this.chunks[0].timestamp.getMilliseconds() <= MAX_CHUNK_AGE_MS + this._bufferMs) break;
+      this.chunks.shift();
     }
   }
 
+  // Skip or pad so the current chunk starts at the play time. Returns the
+  // number of silent frames written at the start of left and right.
+  private hardSync(serverPlayTimeMs: number, left: Float32Array, right: Float32Array): number {
+    let age = serverPlayTimeMs - this.chunk!.startMs();
+    while (this.chunk && age > this.chunk.duration()) {
+      console.debug('Chunk too old, dropping (age: ' + age.toFixed(2) + ' ms)');
+      this.chunk = this.chunks.shift();
+      if (this.chunk) age = serverPlayTimeMs - this.chunk.startMs();
+    }
+    if (!this.chunk) return 0;
+    if (age > 0) {
+      this.chunk.readFrames(Math.floor(age * this.chunk.sampleFormat.msRate()));
+      return 0;
+    }
+    const silentFrames = Math.min(left.length, Math.floor(-age * this.chunk.sampleFormat.msRate()));
+    left.fill(0, 0, silentFrames);
+    right.fill(0, 0, silentFrames);
+    return silentFrames;
+  }
+
   getNextBuffer(buffer: IAudioBuffer, playTimeMs: number) {
+    const frames = buffer.length;
     if (!this._timeProvider.isSynced()) {
       // Without a server time we can't tell which chunk is due, so play
       // silence instead of dropping or skipping chunks
@@ -376,136 +394,64 @@ class AudioStream {
       buffer.getChannelData(1).fill(0);
       return;
     }
-    if (!this.chunk) {
-      this.chunk = this.chunks.shift();
-    }
-    // let age = this.timeProvider.serverTime(this.playTime * 1000) - startMs;
-    const frames = buffer.length;
-    // console.debug("getNextBuffer: " + frames + ", play time: " + playTimeMs.toFixed(2));
+    this.chunk ??= this.chunks.shift();
+
     const left = new Float32Array(frames);
     const right = new Float32Array(frames);
     let read = 0;
     let pos = 0;
-    // let volume = this.muted ? 0 : this.volume;
     const serverPlayTimeMs = this._timeProvider.serverTime(playTimeMs);
     if (this.chunk) {
-      let age = serverPlayTimeMs - this.chunk.startMs(); // - 500;
+      let age = serverPlayTimeMs - this.chunk.startMs();
       const reqChunkDuration = frames / this._sampleFormat.msRate();
-      const secs = Math.floor(Date.now() / 1000);
-      if (this.lastLog !== secs) {
-        this.lastLog = secs;
-        console.log('age: ' + age.toFixed(2) + ', req: ' + reqChunkDuration);
-      }
-      if (age < -reqChunkDuration) {
-        console.log(
-          'age: ' +
-            age.toFixed(2) +
-            ' < req: ' +
-            reqChunkDuration * -1 +
-            ', chunk.startMs: ' +
-            this.chunk.startMs().toFixed(2) +
-            ', timestamp: ' +
-            this.chunk.timestamp.getMilliseconds().toFixed(2),
-        );
-        console.log('Chunk too young, returning silence');
-      } else {
-        if (Math.abs(age) > 5) {
-          // We are 5ms apart, do a hard sync, i.e. don't play faster/slower,
-          // but seek to the desired position instead
-          while (this.chunk && age > this.chunk.duration()) {
-            console.log(
-              'Chunk too old, dropping (age: ' + age.toFixed(2) + ' > ' + this.chunk.duration().toFixed(2) + ')',
-            );
-            this.chunk = this.chunks.shift();
-            if (!this.chunk) break;
-            age = serverPlayTimeMs - (this.chunk as PcmChunkMessage).startMs();
-          }
-          if (this.chunk) {
-            if (age > 0) {
-              console.log('Fast forwarding ' + age.toFixed(2) + 'ms');
-              this.chunk.readFrames(Math.floor(age * this.chunk.sampleFormat.msRate()));
-            } else if (age < 0) {
-              console.log('Playing silence ' + -age.toFixed(2) + 'ms');
-              const silentFrames = Math.floor(-age * this.chunk.sampleFormat.msRate());
-              left.fill(0, 0, silentFrames);
-              right.fill(0, 0, silentFrames);
-              read = silentFrames;
-              pos = silentFrames;
-            }
-            age = 0;
-          }
+      // A chunk that starts after this whole buffer leaves it silent
+      if (age >= -reqChunkDuration) {
+        if (Math.abs(age) > HARD_SYNC_THRESHOLD_MS) {
+          read = pos = this.hardSync(serverPlayTimeMs, left, right);
+          age = 0;
         }
-        // else if (age > 0.1) {
-        //     let rate = age * 0.0005;
-        //     rate = 1.0 - Math.min(rate, 0.0005);
-        //     console.debug("Age > 0, rate: " + rate);
-        //     // we are late (age > 0), this means we are not playing fast enough
-        //     // => the real sample rate seems to be lower, we have to drop some frames
-        //     this.setRealSampleRate(this.sampleFormat.rate * rate); // 0.9999);
-        // }
-        // else if (age < -0.1) {
-        //     let rate = -age * 0.0005;
-        //     rate = 1.0 + Math.min(rate, 0.0005);
-        //     console.debug("Age < 0, rate: " + rate);
-        //     // we are early (age > 0), this means we are playing too fast
-        //     // => the real sample rate seems to be higher, we have to insert some frames
-        //     this.setRealSampleRate(this.sampleFormat.rate * rate); // 0.9999);
-        // }
-        // else {
-        //     this.setRealSampleRate(this.sampleFormat.rate);
-        // }
 
+        // Soft sync: read |addFrames| frames more (late) or fewer (early)
+        // than the buffer holds, dropping or duplicating one frame every
+        // everyN frames. read already counts the silence from a hard sync.
         let addFrames = 0;
-        let everyN = 0;
-        if (age > 0.1) {
-          addFrames = Math.ceil(age); // / 5);
-        } else if (age < -0.1) {
-          addFrames = Math.floor(age); // / 5);
-        }
-        // addFrames = -2;
-        const readFrames = frames + addFrames - read;
-        if (addFrames !== 0) everyN = Math.ceil((frames + addFrames - read) / (Math.abs(addFrames) + 1));
+        if (age > SOFT_SYNC_THRESHOLD_MS) addFrames = Math.ceil(age);
+        else if (age < -SOFT_SYNC_THRESHOLD_MS) addFrames = Math.floor(age);
+        const readFrames = frames + addFrames;
+        const everyN = addFrames !== 0 ? Math.ceil(readFrames / (Math.abs(addFrames) + 1)) : 0;
+        let corrections = 0;
 
-        // addFrames = 0;
-        // console.debug("frames: " + frames + ", readFrames: " + readFrames + ", addFrames: " + addFrames + ", everyN: " + everyN);
         while (read < readFrames && this.chunk) {
-          const pcmChunk = this.chunk as PcmChunkMessage;
+          const pcmChunk = this.chunk;
           const pcmBuffer = pcmChunk.readFrames(readFrames - read);
           // Signed PCM peaks at 2^(bits-1), e.g. 32767 for 16 bit
           const normalize: number = 2 ** (pcmChunk.sampleFormat.bits - 1);
-          let payload: any;
-          if (pcmChunk.sampleFormat.bits >= 24) payload = new Int32Array(pcmBuffer);
-          else payload = new Int16Array(pcmBuffer);
-          // console.debug("readFrames: " + (frames - read) + ", read: " + pcmBuffer.byteLength + ", payload: " + payload.length);
-          // read += (pcmBuffer.byteLength / this.sampleFormat.frameSize());
+          const payload = pcmChunk.sampleFormat.bits >= 24 ? new Int32Array(pcmBuffer) : new Int16Array(pcmBuffer);
           for (let i = 0; i < payload.length; i += 2) {
             read++;
             left[pos] = payload[i] / normalize;
             right[pos] = payload[i + 1] / normalize;
-            if (everyN !== 0 && read % everyN === 0) {
+            if (everyN !== 0 && read % everyN === 0 && corrections < Math.abs(addFrames)) {
+              corrections++;
               if (addFrames > 0) {
+                // Late: the next frame overwrites this one
                 pos--;
               } else {
+                // Early: play this frame twice
                 left[pos + 1] = left[pos];
                 right[pos + 1] = right[pos];
                 pos++;
-                // console.log("Add: " + pos);
               }
             }
             pos++;
           }
-          if (pcmChunk.isEndOfChunk()) {
-            this.chunk = this.chunks.shift();
-          }
+          if (pcmChunk.isEndOfChunk()) this.chunk = this.chunks.shift();
         }
-        if (addFrames !== 0)
-          console.debug('Pos: ' + pos + ', frames: ' + frames + ', add: ' + addFrames + ', everyN: ' + everyN);
         if (read === readFrames) read = frames;
       }
     }
 
     if (read < frames) {
-      console.log('Failed to get chunk, read: ' + read + '/' + frames + ', chunks left: ' + this.chunks.length);
       left.fill(0, pos);
       right.fill(0, pos);
     }
@@ -514,22 +460,6 @@ class AudioStream {
     buffer.getChannelData(0).set(left);
     buffer.getChannelData(1).set(right);
   }
-
-  // setRealSampleRate(sampleRate: number) {
-  //     if (sampleRate == this.sampleFormat.rate) {
-  //         this.correctAfterXFrames = 0;
-  //     }
-  //     else {
-  //         this.correctAfterXFrames = Math.ceil((this.sampleFormat.rate / sampleRate) / (this.sampleFormat.rate / sampleRate - 1.));
-  //         console.debug("setRealSampleRate: " + sampleRate + ", correct after X: " + this.correctAfterXFrames);
-  //     }
-  // }
-
-  chunk?: PcmChunkMessage = undefined;
-  volume: number = 1;
-  muted: boolean = false;
-  lastLog: number = 0;
-  // correctAfterXFrames: number = 0;
 }
 
 class TimeProvider {
@@ -553,7 +483,7 @@ class TimeProvider {
 
   // Remember a time request, so only its reply is used for this clock
   trackRequest(id: number) {
-    if (this.pendingRequests.size > 100) this.pendingRequests.clear();
+    if (this.pendingRequests.size > SYNC_WINDOW) this.pendingRequests.clear();
     this.pendingRequests.add(id & 0xffff);
   }
 
@@ -564,9 +494,8 @@ class TimeProvider {
     return true;
   }
 
-  // Enough samples for the median to ignore a single outlier
   isSynced(): boolean {
-    return this.diffBuffer.length >= 3;
+    return this.diffBuffer.length >= SYNC_MIN_SAMPLES;
   }
 
   // The audio clock reads 0 until it runs, which makes samples meaningless
@@ -576,12 +505,10 @@ class TimeProvider {
 
   setDiff(c2s: number, s2c: number) {
     if (!this.isRunning()) return;
-    if (this.diffBuffer.push((c2s - s2c) / 2) > 100) this.diffBuffer.shift();
+    if (this.diffBuffer.push((c2s - s2c) / 2) > SYNC_WINDOW) this.diffBuffer.shift();
     const sorted = [...this.diffBuffer];
     sorted.sort((a, b) => a - b);
     this.diff = sorted[Math.floor(sorted.length / 2)];
-    // console.debug("c2s: " + c2s.toFixed(2) + ", s2c: " + s2c.toFixed(2) + ", diff: " + this.diff.toFixed(2) + ", now: " + this.now().toFixed(2) + ", server.now: " + this.serverNow().toFixed(2) + ", win.now: " + window.performance.now().toFixed(2));
-    // console.log("now: " + this.now() + "\t" + this.now() + "\t" + this.now());
   }
 
   now() {
@@ -625,6 +552,7 @@ class SampleFormat {
     return this.rate + ':' + this.bits + ':' + this.channels;
   }
 
+  // 24 bit samples are stored in 32 bits
   public sampleSize(): number {
     if (this.bits === 24) {
       return 4;
@@ -634,10 +562,6 @@ class SampleFormat {
 
   public frameSize(): number {
     return this.channels * this.sampleSize();
-  }
-
-  public durationMs(bytes: number) {
-    return (bytes / this.frameSize()) * this.msRate();
   }
 }
 
@@ -649,65 +573,67 @@ class Decoder {
   decode(_chunk: PcmChunkMessage): PcmChunkMessage | null | Promise<PcmChunkMessage | null> {
     return null;
   }
+
+  // Release native (WASM) resources
+  dispose() {}
 }
 
 class FlacDecoder extends Decoder {
   constructor() {
     super();
-    this.decoder = Flac.create_libflac_decoder(true);
-    if (this.decoder) {
-      const init_status = Flac.init_decoder_stream(
-        this.decoder,
+    this.decoder = this.createDecoder();
+  }
+
+  private createDecoder(): number {
+    const decoder = Flac.create_libflac_decoder(true);
+    if (decoder) {
+      Flac.init_decoder_stream(
+        decoder,
         this.read_callback_fn.bind(this),
         this.write_callback_fn.bind(this),
         this.error_callback_fn.bind(this),
         this.metadata_callback_fn.bind(this),
         false,
       );
-      console.log('Flac init: ' + init_status);
-      Flac.setOptions(this.decoder, { analyseSubframes: true, analyseResiduals: true });
+      Flac.setOptions(decoder, { analyseSubframes: true, analyseResiduals: true });
     }
-    this.sampleFormat = new SampleFormat();
-    this.flacChunk = new ArrayBuffer(0);
-    // this.pcmChunk  = new PcmChunkMessage();
-
-    // Flac.setOptions(this.decoder, {analyseSubframes: analyse_frames, analyseResiduals: analyse_residuals});
-    // flac_ok &= init_status == 0;
-    // console.log("flac init     : " + flac_ok);//DEBUG
+    return decoder;
   }
 
   decode(chunk: PcmChunkMessage): PcmChunkMessage | null {
-    // console.log("Flac decode: " + chunk.payload.byteLength);
     this.flacChunk = chunk.payload.slice(0);
     this.pcmChunk = chunk;
-    this.pcmChunk!.clearPayload();
+    this.pcmChunk.clearPayload();
     this.cacheInfo = { cachedBlocks: 0, isCachedChunk: true };
-    // console.log("Flac len: " + this.flacChunk.byteLength);
     while (this.flacChunk.byteLength > 0) {
       if (!Flac.FLAC__stream_decoder_process_single(this.decoder)) {
+        // libflacjs has no flush, and a failed decoder stays failed, so
+        // start over from the stream header
+        console.warn('FLAC decoding failed, restarting the decoder');
+        this.restart();
         return null;
       }
-      // const state = Flac.FLAC__stream_decoder_get_state(this.decoder);
-      // console.log("State: " + state);
     }
-    // console.log("Pcm payload: " + this.pcmChunk!.payloadSize());
     if (this.cacheInfo.cachedBlocks > 0) {
       const diffMs = this.cacheInfo.cachedBlocks / this.sampleFormat.msRate();
-      // console.log("Cached: " + this.cacheInfo.cachedBlocks + ", " + diffMs + "ms");
-      this.pcmChunk!.timestamp.setMilliseconds(this.pcmChunk!.timestamp.getMilliseconds() - diffMs);
+      this.pcmChunk.timestamp.setMilliseconds(this.pcmChunk.timestamp.getMilliseconds() - diffMs);
     }
-    return this.pcmChunk!;
+    return this.pcmChunk;
+  }
+
+  private restart() {
+    this.dispose();
+    this.flacChunk = new ArrayBuffer(0);
+    this.decoder = this.createDecoder();
+    if (this.streamHeader) this.setHeader(this.streamHeader);
   }
 
   read_callback_fn(bufferSize: number): Flac.ReadResult | Flac.CompletedReadResult {
-    // console.log('  decode read callback, buffer bytes max=', bufferSize);
     if (this.header) {
-      console.log('  header: ' + this.header.byteLength);
       const data = new Uint8Array(this.header);
       this.header = null;
       return { buffer: data, readDataLength: data.byteLength, error: false };
     } else if (this.flacChunk) {
-      // console.log("  flacChunk: " + this.flacChunk.byteLength);
       // a fresh read => next call to write will not be from cached data
       this.cacheInfo.isCachedChunk = false;
       const data = new Uint8Array(this.flacChunk.slice(0, Math.min(bufferSize, this.flacChunk.byteLength)));
@@ -718,17 +644,15 @@ class FlacDecoder extends Decoder {
   }
 
   write_callback_fn(data: Array<Uint8Array>, frameInfo: Flac.BlockMetadata) {
-    // console.log("  write frame metadata blocksize: " + frameInfo.blocksize + ", channels: " + frameInfo.channels + ", len: " + data.length);
     if (this.cacheInfo.isCachedChunk) {
       // there was no call to read, so it's some cached data
       this.cacheInfo.cachedBlocks += frameInfo.blocksize;
     }
     const payload = new ArrayBuffer(this.sampleFormat.frameSize() * frameInfo.blocksize);
     const view = new DataView(payload);
+    const sample_size = this.sampleFormat.sampleSize();
     for (let channel: number = 0; channel < frameInfo.channels; ++channel) {
       const channelData = new DataView(data[channel].buffer, 0, data[channel].buffer.byteLength);
-      // console.log("channelData: " + channelData.byteLength + ", blocksize: " + frameInfo.blocksize);
-      const sample_size = this.sampleFormat.sampleSize();
       for (let i: number = 0; i < frameInfo.blocksize; ++i) {
         const write_idx = sample_size * (frameInfo.channels * i + channel);
         const read_idx = sample_size * i;
@@ -737,54 +661,44 @@ class FlacDecoder extends Decoder {
       }
     }
     this.pcmChunk!.addPayload(payload);
-    // console.log("write: " + payload.byteLength + ", len: " + this.pcmChunk!.payloadSize());
   }
 
-  /** @memberOf decode */
   metadata_callback_fn(data: any) {
-    console.info('meta data: ', data);
-    // let view = new DataView(data);
     this.sampleFormat.rate = data.sampleRate;
     this.sampleFormat.channels = data.channels;
     this.sampleFormat.bits = data.bitsPerSample;
-    console.log('metadata_callback_fn, sampleformat: ' + this.sampleFormat.toString());
   }
 
-  /** @memberOf decode */
   error_callback_fn(err: any, errMsg: any) {
-    console.error('decode error callback', err, errMsg);
+    console.error('FLAC decode error', err, errMsg);
   }
 
   setHeader(buffer: ArrayBuffer): SampleFormat | null {
+    this.streamHeader = buffer.slice(0);
     this.header = buffer.slice(0);
     Flac.FLAC__stream_decoder_process_until_end_of_metadata(this.decoder);
     return this.sampleFormat;
   }
 
-  sampleFormat: SampleFormat;
+  dispose() {
+    if (this.decoder) Flac.FLAC__stream_decoder_delete(this.decoder);
+    this.decoder = 0;
+  }
+
+  sampleFormat: SampleFormat = new SampleFormat();
   decoder: number;
+  // The header still to be read by the decoder, and a copy for restarts
   header: ArrayBuffer | null = null;
-  flacChunk: ArrayBuffer;
+  streamHeader: ArrayBuffer | null = null;
+  flacChunk: ArrayBuffer = new ArrayBuffer(0);
   pcmChunk?: PcmChunkMessage;
 
   cacheInfo: { isCachedChunk: boolean; cachedBlocks: number } = { isCachedChunk: false, cachedBlocks: 0 };
 }
 
+const OPUS_SAMPLE_RATES = [8000, 12000, 16000, 24000, 48000];
+
 class OpusDecoder extends Decoder {
-  constructor() {
-    super();
-    this.sampleFormat = new SampleFormat();
-    this.decoder = null;
-  }
-
-  async initDecoder() {
-    if (!this.decoder) {
-      this.decoder = new WasmOpusDecoder();
-      await this.decoder.ready;
-      await this.decoder.reset();
-    }
-  }
-
   setHeader(buffer: ArrayBuffer): SampleFormat | null {
     const view = new DataView(buffer);
     const ID_OPUS = 0x4f505553;
@@ -799,40 +713,45 @@ class OpusDecoder extends Decoder {
     this.sampleFormat.rate = view.getUint32(4, true);
     this.sampleFormat.bits = view.getUint16(8, true);
     this.sampleFormat.channels = view.getUint16(10, true);
+    if (!OPUS_SAMPLE_RATES.includes(this.sampleFormat.rate)) {
+      console.error('Unsupported Opus sample rate:', this.sampleFormat.rate);
+      return null;
+    }
 
-    this.initDecoder().catch((err) => console.error('Failed to initialize Opus decoder:', err));
-
-    console.log('Opus sampleformat:', this.sampleFormat.toString());
+    // Decode at the stream's rate; the decoder defaults to 48 kHz
+    const decoder = new WasmOpusDecoder({
+      sampleRate: this.sampleFormat.rate as OpusDecoderSampleRate,
+      channels: this.sampleFormat.channels,
+    });
+    this.decoder = decoder;
+    this.ready = decoder.ready.then(() => decoder.reset());
+    this.ready.catch((err) => console.error('Failed to initialize Opus decoder:', err));
     return this.sampleFormat;
   }
 
   async decode(chunk: PcmChunkMessage): Promise<PcmChunkMessage | null> {
-    if (!this.decoder) {
-      console.error('Opus decoder not initialized');
-      return null;
-    }
-
+    if (!this.decoder || !this.ready) return null;
     try {
-      const decoded = await this.decoder.decodeFrame(new Uint8Array(chunk.payload));
+      await this.ready;
+      const decoded = this.decoder.decodeFrame(new Uint8Array(chunk.payload));
+      if (decoded.errors.length > 0) console.warn('Opus decode errors:', decoded.errors);
 
+      const channels = this.sampleFormat.channels;
       const bytesPerSample = this.sampleFormat.sampleSize();
-      const buffer = new ArrayBuffer(decoded.channelData[0].length * bytesPerSample * this.sampleFormat.channels);
-      const view = new DataView(buffer);
-
-      for (let i = 0; i < decoded.channelData[0].length; i++) {
-        for (let channel = 0; channel < this.sampleFormat.channels; channel++) {
-          const sample =
-            Math.max(-1, Math.min(1, decoded.channelData[channel][i])) * ((1 << (this.sampleFormat.bits - 1)) - 1);
-          if (bytesPerSample === 4) {
-            view.setInt32((i * this.sampleFormat.channels + channel) * 4, sample, true);
-          } else {
-            view.setInt16((i * this.sampleFormat.channels + channel) * 2, sample, true);
-          }
+      const samples = decoded.channelData[0].length;
+      const view = new DataView(new ArrayBuffer(samples * bytesPerSample * channels));
+      const scale = 2 ** (this.sampleFormat.bits - 1) - 1;
+      for (let i = 0; i < samples; i++) {
+        for (let channel = 0; channel < channels; channel++) {
+          const sample = Math.round(Math.max(-1, Math.min(1, decoded.channelData[channel][i])) * scale);
+          const offset = (i * channels + channel) * bytesPerSample;
+          if (bytesPerSample === 4) view.setInt32(offset, sample, true);
+          else view.setInt16(offset, sample, true);
         }
       }
 
       chunk.clearPayload();
-      chunk.addPayload(buffer);
+      chunk.addPayload(view.buffer);
       return chunk;
     } catch (err) {
       console.error('Failed to decode Opus frame:', err);
@@ -840,38 +759,14 @@ class OpusDecoder extends Decoder {
     }
   }
 
-  private decoder: WasmOpusDecoder | null;
-  private sampleFormat: SampleFormat;
-}
-
-class PlayBuffer {
-  constructor(
-    buffer: IAudioBuffer,
-    playTime: number,
-    source: IAudioBufferSourceNode<IAudioContext>,
-    destination: IGainNode<IAudioContext>,
-  ) {
-    this.buffer = buffer;
-    this.playTime = playTime;
-    this.source = source;
-    this.source.buffer = this.buffer;
-    this.source.connect(destination);
-    this.onended = (_playBuffer: PlayBuffer) => {};
+  dispose() {
+    this.decoder?.free();
+    this.decoder = null;
   }
 
-  public onended: (_playBuffer: PlayBuffer) => void;
-
-  start() {
-    this.source.onended = () => {
-      this.onended(this);
-    };
-    this.source.start(this.playTime);
-  }
-
-  buffer: IAudioBuffer;
-  playTime: number;
-  source: IAudioBufferSourceNode<IAudioContext>;
-  num: number = 0;
+  private decoder: WasmOpusDecoder<OpusDecoderSampleRate> | null = null;
+  private ready: Promise<void> | null = null;
+  private sampleFormat: SampleFormat = new SampleFormat();
 }
 
 class PcmDecoder extends Decoder {
@@ -889,6 +784,48 @@ class PcmDecoder extends Decoder {
   }
 }
 
+class PlayBuffer {
+  constructor(
+    buffer: IAudioBuffer,
+    playTime: number,
+    source: IAudioBufferSourceNode<IAudioContext>,
+    destination: IGainNode<IAudioContext>,
+  ) {
+    this.buffer = buffer;
+    this.playTime = playTime;
+    this.source = source;
+    this.source.buffer = this.buffer;
+    this.source.connect(destination);
+  }
+
+  public onended: (_playBuffer: PlayBuffer) => void = () => {};
+
+  start() {
+    this.source.onended = () => {
+      this.onended(this);
+    };
+    this.source.start(this.playTime);
+  }
+
+  buffer: IAudioBuffer;
+  playTime: number;
+  source: IAudioBufferSourceNode<IAudioContext>;
+}
+
+function createDecoder(codec: string): Decoder | undefined {
+  switch (codec) {
+    case 'flac':
+      return new FlacDecoder();
+    case 'pcm':
+      return new PcmDecoder();
+    case 'opus':
+      return new OpusDecoder();
+    default:
+      return undefined;
+  }
+}
+
+// Plays the server's audio stream on this device
 class SnapStream {
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -901,28 +838,20 @@ class SnapStream {
     }
   }
 
-  public resume() {
-    this.ctx.resume();
-  }
-
   private setupAudioContext(): boolean {
-    if (AudioContext) {
-      let options: AudioContextOptions | undefined;
-      options = { latencyHint: 'interactive', sampleRate: this.sampleFormat ? this.sampleFormat.rate : undefined };
-
-      const chromeVersion = getChromeVersion();
-      if ((chromeVersion !== null && chromeVersion < 55) || !window.AudioContext) {
-        // Some older browsers won't decode the stream if options are provided.
-        options = undefined;
-      }
-
-      this.ctx = new AudioContextPatched(options);
-      this.gainNode = this.ctx.createGain();
-      this.gainNode.connect(this.ctx.destination);
-    } else {
-      // Web Audio API is not supported
-      return false;
+    if (!AudioContext) return false;
+    let options: AudioContextOptions | undefined = {
+      latencyHint: 'interactive',
+      sampleRate: this.sampleFormat ? this.sampleFormat.rate : undefined,
+    };
+    const chromeVersion = getChromeVersion();
+    if ((chromeVersion !== null && chromeVersion < 55) || !window.AudioContext) {
+      // Some older browsers won't decode the stream if options are provided.
+      options = undefined;
     }
+    this.ctx = new AudioContextPatched(options);
+    this.gainNode = this.ctx.createGain();
+    this.gainNode.connect(this.ctx.destination);
     return true;
   }
 
@@ -931,147 +860,129 @@ class SnapStream {
   }
 
   private connect() {
-    this.streamsocket = new WebSocket(this.baseUrl + '/stream');
-    this.streamsocket.binaryType = 'arraybuffer';
-    this.streamsocket.onmessage = (ev) => this.onMessage(ev);
-
-    this.streamsocket.onopen = () => {
-      console.log('on open');
+    if (this.stopped) return;
+    const socket = new WebSocket(this.baseUrl + '/stream');
+    this.streamsocket = socket;
+    socket.binaryType = 'arraybuffer';
+    socket.onmessage = (ev) => this.onMessage(ev);
+    socket.onopen = () => {
       const hello = new HelloMessage();
-
       hello.mac = '00:00:00:00:00:00';
       hello.arch = 'web';
       hello.os = navigator?.platform || 'unknown';
       hello.hostname = 'Snapweb client';
       hello.uniqueId = SnapStream.getClientId();
-
       this.sendMessage(hello);
       this.syncTime();
-      this.syncHandle = window.setInterval(() => this.syncTime(), 1000);
+      this.syncHandle = window.setInterval(() => this.syncTime(), SYNC_INTERVAL_MS);
     };
-    this.streamsocket.onerror = (ev) => {
-      console.error('error:', ev);
+    socket.onerror = (ev) => {
+      console.error('Stream connection error:', ev);
     };
-    this.streamsocket.onclose = () => {
-      window.clearInterval(this.syncHandle);
-      this.clearSyncBurst();
-      console.info('connection lost, reconnecting in 1s');
-      setTimeout(() => this.connect(), 1000);
+    socket.onclose = () => {
+      this.stopSync();
+      this.reconnectHandle = window.setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
     };
   }
 
   private onMessage(msg: MessageEvent) {
-    const view = new DataView(msg.data);
-    const type = view.getUint16(0, true);
-    if (type === 1) {
-      const codec = new CodecMessage(msg.data);
-      console.log('Codec: ' + codec.codec);
-      if (codec.codec === 'flac') {
-        this.decoder = new FlacDecoder();
-      } else if (codec.codec === 'pcm') {
-        this.decoder = new PcmDecoder();
-      } else if (codec.codec === 'opus') {
-        this.decoder = new OpusDecoder();
-      } else {
-        alert('Codec not supported: ' + codec.codec);
-      }
-      if (this.decoder) {
-        this.sampleFormat = this.decoder.setHeader(codec.payload)!;
-        console.log('Sampleformat: ' + this.sampleFormat.toString());
-        if (this.sampleFormat.channels !== 2 || this.sampleFormat.bits < 16) {
-          alert('Stream must be stereo with 16, 24 or 32 bit depth, actual format: ' + this.sampleFormat.toString());
-        } else {
-          if (this.bufferDurationMs !== 0) {
-            this.bufferFrameCount = Math.floor(this.bufferDurationMs * this.sampleFormat.msRate());
-          }
-
-          // NOTE (curiousercreative): this breaks iOS audio output on v15.7.5 at least
-          if (window.AudioContext) {
-            if (this.sampleFormat.rate !== this.ctx.sampleRate.valueOf()) {
-              console.log(
-                'Stream samplerate != audio context samplerate (' +
-                  this.sampleFormat.rate +
-                  ' != ' +
-                  this.ctx.sampleRate.valueOf() +
-                  '), switching audio context to ' +
-                  this.sampleFormat.rate +
-                  ' Hz',
-              );
-              // we are not using webkitAudioContext, so it's safe to setup a new AudioContext with the new samplerate
-              // since this code is not triggered by direct user input, we cannt create a webkitAudioContext here
-              this.stopAudio();
-              this.setupAudioContext();
-            }
-          }
-
-          this.ctx.resume();
-          this.timeProvider.setAudioContext(this.ctx);
-          this.syncBurst();
-          this.gainNode.gain.value = this.serverSettings!.muted ? 0 : this.serverSettings!.volumePercent / 100;
-          // this.timeProvider = new TimeProvider(this.ctx);
-          this.stream = new AudioStream(this.timeProvider, this.sampleFormat, this.bufferMs);
-          this.latency =
-            (this.ctx.baseLatency !== undefined ? this.ctx.baseLatency : 0) +
-            (this.ctx.outputLatency !== undefined ? this.ctx!.outputLatency : 0);
-          console.log(
-            'Base latency: ' +
-              this.ctx.baseLatency +
-              ', output latency: ' +
-              this.ctx!.outputLatency +
-              ', latency: ' +
-              this.latency,
-          );
-          this.play();
-        }
-      }
-    } else if (type === 2) {
-      const pcmChunk = new PcmChunkMessage(msg.data, this.sampleFormat as SampleFormat);
-      if (this.decoder) {
-        const decodedPromise = this.decoder.decode(pcmChunk);
-        Promise.resolve(decodedPromise)
-          .then((decoded) => {
-            if (decoded) {
-              this.stream!.addChunk(decoded);
-            }
-          })
-          .catch((err) => {
-            console.error('Error decoding chunk:', err);
-          });
-      }
-    } else if (type === 3) {
-      this.serverSettings = new ServerSettingsMessage(msg.data);
-      this.gainNode.gain.value = this.serverSettings.muted ? 0 : this.serverSettings.volumePercent / 100;
-      this.bufferMs = this.serverSettings.bufferMs - this.serverSettings.latency;
-      console.log(
-        'ServerSettings bufferMs: ' +
-          this.serverSettings.bufferMs +
-          ', latency: ' +
-          this.serverSettings.latency +
-          ', volume: ' +
-          this.serverSettings.volumePercent +
-          ', muted: ' +
-          this.serverSettings.muted,
-      );
-    } else if (type === 4) {
-      if (this.timeProvider) {
-        const time = new TimeMessage(msg.data);
-        this.timeProvider.handleReply(
-          time.refersTo,
-          time.latency.getMilliseconds(),
-          this.timeProvider.now() - time.sent.getMilliseconds(),
-        );
-      }
-      // console.log("Time sec: " + time.latency.sec + ", usec: " + time.latency.usec + ", diff: " + this.timeProvider.diff);
-    } else {
-      console.info('Message not handled, type: ' + type);
+    if (this.stopped) return;
+    const type = new DataView(msg.data).getUint16(0, true);
+    switch (type) {
+      case MessageType.CodecHeader:
+        this.handleCodecHeader(new CodecMessage(msg.data));
+        break;
+      case MessageType.WireChunk:
+        this.handleWireChunk(new PcmChunkMessage(msg.data, this.sampleFormat as SampleFormat));
+        break;
+      case MessageType.ServerSettings:
+        this.handleServerSettings(new ServerSettingsMessage(msg.data));
+        break;
+      case MessageType.Time:
+        this.handleTime(new TimeMessage(msg.data));
+        break;
+      default:
+        console.info('Message not handled, type: ' + type);
     }
+  }
+
+  // Sent on connect and when the server's stream or codec changes
+  private handleCodecHeader(codec: CodecMessage) {
+    // Stop whatever the previous header started, so playback chains and
+    // decoders don't pile up
+    this.stopAudio();
+    this.decoder?.dispose();
+    this.stream = undefined;
+
+    this.decoder = createDecoder(codec.codec);
+    if (!this.decoder) {
+      alert('Codec not supported: ' + codec.codec);
+      return;
+    }
+    const sampleFormat = this.decoder.setHeader(codec.payload);
+    if (!sampleFormat || sampleFormat.channels !== 2 || ![16, 24, 32].includes(sampleFormat.bits)) {
+      alert('Stream must be stereo with 16, 24 or 32 bit depth, actual format: ' + sampleFormat?.toString());
+      this.decoder.dispose();
+      this.decoder = undefined;
+      return;
+    }
+    this.sampleFormat = sampleFormat;
+    this.bufferFrameCount = Math.floor(BUFFER_DURATION_MS * sampleFormat.msRate());
+
+    // NOTE (curiousercreative): this breaks iOS audio output on v15.7.5 at least
+    if (window.AudioContext && sampleFormat.rate !== this.ctx.sampleRate.valueOf()) {
+      console.info('Switching the audio context to the stream sample rate of ' + sampleFormat.rate + ' Hz');
+      // We don't use webkitAudioContext, so a new AudioContext can be
+      // created here without direct user input
+      this.closeAudioContext();
+      this.setupAudioContext();
+    }
+
+    this.ctx.resume();
+    this.timeProvider.setAudioContext(this.ctx);
+    this.syncBurst();
+    this.applyVolume();
+    this.stream = new AudioStream(this.timeProvider, sampleFormat, this.bufferMs);
+    this.play();
+  }
+
+  private handleWireChunk(chunk: PcmChunkMessage) {
+    const decoder = this.decoder;
+    if (!decoder) return;
+    Promise.resolve(decoder.decode(chunk))
+      .then((decoded) => {
+        // Ignore chunks decoded after the decoder was replaced
+        if (decoded && decoder === this.decoder) this.stream?.addChunk(decoded);
+      })
+      .catch((err) => {
+        console.error('Error decoding chunk:', err);
+      });
+  }
+
+  private handleServerSettings(settings: ServerSettingsMessage) {
+    this.serverSettings = settings;
+    this.applyVolume();
+    this.bufferMs = settings.bufferMs - settings.latency;
+  }
+
+  private handleTime(time: TimeMessage) {
+    this.timeProvider.handleReply(
+      time.refersTo,
+      time.latency.getMilliseconds(),
+      this.timeProvider.now() - time.sent.getMilliseconds(),
+    );
+  }
+
+  private applyVolume() {
+    if (this.serverSettings)
+      this.gainNode.gain.value = this.serverSettings.muted ? 0 : this.serverSettings.volumePercent / 100;
   }
 
   private sendMessage(msg: BaseMessage) {
     msg.sent = new Tv(0, 0);
     msg.sent.setMilliseconds(this.timeProvider.now());
     msg.id = ++this.msgId;
-    if (this.streamsocket.readyState === this.streamsocket.OPEN) {
+    if (this.streamsocket?.readyState === WebSocket.OPEN) {
       this.streamsocket.send(msg.serialize());
     }
   }
@@ -1083,13 +994,13 @@ class SnapStream {
     t.latency.setMilliseconds(this.timeProvider.now());
     this.sendMessage(t);
     this.timeProvider.trackRequest(t.id);
-    // console.log("prepareSource median: " + Math.round(this.median * 10) / 10);
   }
 
-  // Sync quickly after switching clocks instead of waiting for the 1s timer
+  // Sync quickly after switching clocks instead of waiting for the interval
   private syncBurst() {
     this.clearSyncBurst();
-    for (let i = 0; i < 10; ++i) this.syncBurstHandles.push(window.setTimeout(() => this.syncTime(), i * 25));
+    for (let i = 0; i < SYNC_BURST_COUNT; ++i)
+      this.syncBurstHandles.push(window.setTimeout(() => this.syncTime(), i * SYNC_BURST_SPACING_MS));
   }
 
   private clearSyncBurst() {
@@ -1097,86 +1008,94 @@ class SnapStream {
     this.syncBurstHandles = [];
   }
 
+  private stopSync() {
+    window.clearInterval(this.syncHandle);
+    this.clearSyncBurst();
+  }
+
+  // Stop the scheduled buffers and their onended -> playNext chain
   private stopAudio() {
-    // if (this.ctx) {
-    //     this.ctx.close();
-    // }
-    this.ctx.suspend();
     while (this.audioBuffers.length > 0) {
-      const buffer = this.audioBuffers.pop();
-      buffer!.onended = () => {};
-      buffer!.source.stop();
+      const buffer = this.audioBuffers.pop()!;
+      buffer.onended = () => {};
+      buffer.source.stop();
     }
-    while (this.freeBuffers.length > 0) {
-      this.freeBuffers.pop();
-    }
+    this.freeBuffers = [];
+  }
+
+  // Browsers limit how many AudioContexts can exist, so close them
+  private closeAudioContext() {
+    this.stopAudio();
+    this.gainNode?.disconnect();
+    this.ctx?.close().catch((e) => console.warn('Failed to close the audio context: ' + e));
   }
 
   public stop() {
-    window.clearInterval(this.syncHandle);
-    this.clearSyncBurst();
-    this.stopAudio();
-    if (this.streamsocket.readyState === WebSocket.OPEN || this.streamsocket.readyState === WebSocket.CONNECTING) {
-      this.streamsocket.onclose = () => {};
-      this.streamsocket.close();
+    this.stopped = true;
+    this.stopSync();
+    window.clearTimeout(this.reconnectHandle);
+    const socket = this.streamsocket;
+    if (socket) {
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
     }
+    this.closeAudioContext();
+    this.decoder?.dispose();
+    this.decoder = undefined;
+    this.stream = undefined;
   }
 
   public play() {
-    this.playTime = this.timeProvider.nowSec() + 0.1;
-    for (let i = 1; i <= this.audioBufferCount; ++i) {
+    this.playTime = this.timeProvider.nowSec() + PLAY_START_DELAY_S;
+    for (let i = 0; i < AUDIO_BUFFER_COUNT; ++i) {
       this.playNext();
     }
   }
 
   public playNext() {
+    if (!this.stream || !this.sampleFormat) return;
     const buffer =
       this.freeBuffers.pop() ||
-      this.ctx!.createBuffer(this.sampleFormat!.channels, this.bufferFrameCount, this.sampleFormat!.rate);
-    const playTimeMs = (this.playTime + this.latency) * 1000 - this.bufferMs;
-    this.stream!.getNextBuffer(buffer, playTimeMs);
+      this.ctx.createBuffer(this.sampleFormat.channels, this.bufferFrameCount, this.sampleFormat.rate);
+    // Read every time, since the output device (and its latency) can change
+    const latency = (this.ctx.baseLatency ?? 0) + (this.ctx.outputLatency ?? 0);
+    const playTimeMs = (this.playTime + latency) * 1000 - this.bufferMs;
+    this.stream.getNextBuffer(buffer, playTimeMs);
 
-    const source = this.ctx!.createBufferSource();
-    const playBuffer = new PlayBuffer(buffer, this.playTime, source, this.gainNode!);
+    const source = this.ctx.createBufferSource();
+    const playBuffer = new PlayBuffer(buffer, this.playTime, source, this.gainNode);
     this.audioBuffers.push(playBuffer);
-    playBuffer.num = ++this.bufferNum;
-    playBuffer.onended = (buffer: PlayBuffer) => {
-      // let diff = this.timeProvider.nowSec() - buffer.playTime;
-      this.freeBuffers.push(this.audioBuffers.splice(this.audioBuffers.indexOf(buffer), 1)[0].buffer);
-      // console.debug("PlayBuffer " + playBuffer.num + " ended after: " + (diff * 1000) + ", in flight: " + this.audioBuffers.length);
+    playBuffer.onended = (ended: PlayBuffer) => {
+      this.freeBuffers.push(this.audioBuffers.splice(this.audioBuffers.indexOf(ended), 1)[0].buffer);
       this.playNext();
     };
     playBuffer.start();
-    this.playTime += this.bufferFrameCount / (this.sampleFormat as SampleFormat).rate;
+    this.playTime += this.bufferFrameCount / this.sampleFormat.rate;
   }
 
   baseUrl: string;
-  streamsocket!: WebSocket;
+  streamsocket?: WebSocket;
+  stopped: boolean = false;
   playTime: number = 0;
   msgId: number = 0;
-  bufferDurationMs: number = 80; // 0;
-  bufferFrameCount: number = 3844; // 9600; // 2400;//8192;
+  bufferFrameCount: number = 0;
   syncHandle: number = -1;
   syncBurstHandles: number[] = [];
-  // ageBuffer: Array<number>;
+  reconnectHandle: number = -1;
   audioBuffers: Array<PlayBuffer> = new Array<PlayBuffer>();
   freeBuffers: Array<IAudioBuffer> = new Array<IAudioBuffer>();
 
   timeProvider: TimeProvider;
   stream: AudioStream | undefined;
-  ctx!: IAudioContextPatched; // | undefined;
+  ctx!: IAudioContextPatched;
   gainNode!: IGainNode<IAudioContext>;
   serverSettings: ServerSettingsMessage | undefined;
   decoder: Decoder | undefined;
   sampleFormat: SampleFormat | undefined;
-
-  // median: number = 0;
-  audioBufferCount: number = 3;
   bufferMs: number = 1000;
-  bufferNum: number = 0;
-
-  latency: number = 0;
 }
 
 export { SnapStream };
-export { AudioStream, JsonMessage, HelloMessage, SampleFormat, TimeMessage, TimeProvider, Tv };
+export { AudioStream, JsonMessage, HelloMessage, PcmChunkMessage, SampleFormat, TimeMessage, TimeProvider, Tv };

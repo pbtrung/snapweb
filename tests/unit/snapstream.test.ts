@@ -3,6 +3,7 @@ import {
   AudioStream,
   HelloMessage,
   JsonMessage,
+  PcmChunkMessage,
   SampleFormat,
   SnapStream,
   TimeMessage,
@@ -207,5 +208,107 @@ describe('AudioStream', () => {
     expect(Array.from(buffer.channels[1])).toEqual([0, 0, 0, 0]);
     expect(stream.chunks).toEqual([chunk]);
     expect(stream.chunk).toBeUndefined();
+  });
+});
+
+// A wire chunk with the given stereo 16 bit samples, starting at timestampMs
+function wireChunk(timestampMs: number, samples: number[], sampleFormat: SampleFormat) {
+  const buffer = new ArrayBuffer(38 + samples.length * 2);
+  const view = new DataView(buffer);
+  view.setUint16(0, 2, true);
+  const ts = new Tv(0, 0);
+  ts.setMilliseconds(timestampMs);
+  view.setInt32(26, ts.sec, true);
+  view.setInt32(30, ts.usec, true);
+  view.setUint32(34, samples.length * 2, true);
+  samples.forEach((sample, i) => view.setInt16(38 + i * 2, sample, true));
+  return new PcmChunkMessage(buffer, sampleFormat);
+}
+
+describe('AudioStream playback', () => {
+  // 1 frame per ms keeps the arithmetic readable
+  function sampleFormat() {
+    const format = new SampleFormat();
+    format.rate = 1000;
+    return format;
+  }
+
+  function syncedProvider() {
+    const provider = new TimeProvider();
+    vi.spyOn(provider, 'isSynced').mockReturnValue(true);
+    vi.spyOn(provider, 'now').mockReturnValue(50000);
+    return provider;
+  }
+
+  function fakeBuffer(frames: number) {
+    const channels = [new Float32Array(frames), new Float32Array(frames)];
+    return { length: frames, getChannelData: (i: number) => channels[i], channels };
+  }
+
+  // Frame n carries the sample value n * 1000
+  function frames(count: number) {
+    return Array.from({ length: count }, (_, i) => [1000 * (i + 1), 1000 * (i + 1)]).flat();
+  }
+
+  it('catches up by dropping frames when slightly late', () => {
+    const format = sampleFormat();
+    const stream = new AudioStream(syncedProvider(), format, 1000);
+    // 1.5 ms late: read 6 frames into 4, dropping 2 of them
+    stream.addChunk(wireChunk(50000 - 1.5, frames(20), format));
+    const buffer = fakeBuffer(4);
+    stream.getNextBuffer(buffer as any, 50000);
+
+    expect(Array.from(buffer.channels[0]).map((sample) => Math.round((sample * 32768) / 1000))).toEqual([1, 3, 5, 6]);
+    expect(stream.chunk!.idx).toBe(6);
+  });
+
+  it('slows down by repeating frames when slightly early', () => {
+    const format = sampleFormat();
+    const stream = new AudioStream(syncedProvider(), format, 1000);
+    // 1.5 ms early: read 2 frames into 4, playing each twice
+    stream.addChunk(wireChunk(50000 + 1.5, frames(20), format));
+    const buffer = fakeBuffer(4);
+    stream.getNextBuffer(buffer as any, 50000);
+
+    expect(Array.from(buffer.channels[0]).map((sample) => Math.round((sample * 32768) / 1000))).toEqual([1, 1, 2, 2]);
+    expect(stream.chunk!.idx).toBe(2);
+  });
+
+  it('seeks into the chunk when far behind', () => {
+    const format = sampleFormat();
+    const stream = new AudioStream(syncedProvider(), format, 1000);
+    // 10 ms late: skip 10 frames, then play from frame 11
+    stream.addChunk(wireChunk(50000 - 10, frames(20), format));
+    const buffer = fakeBuffer(4);
+    stream.getNextBuffer(buffer as any, 50000);
+
+    expect(Array.from(buffer.channels[0]).map((sample) => Math.round((sample * 32768) / 1000))).toEqual([
+      11, 12, 13, 14,
+    ]);
+  });
+
+  it('pads with silence when far ahead', () => {
+    const format = sampleFormat();
+    const stream = new AudioStream(syncedProvider(), format, 1000);
+    // The chunk starts 6 ms into a 10 ms buffer, beyond the 5 ms hard sync threshold
+    stream.addChunk(wireChunk(50000 + 6, frames(20), format));
+    const buffer = fakeBuffer(10);
+    stream.getNextBuffer(buffer as any, 50000);
+
+    expect(Array.from(buffer.channels[0]).map((sample) => Math.round((sample * 32768) / 1000))).toEqual([
+      0, 0, 0, 0, 0, 0, 1, 2, 3, 4,
+    ]);
+  });
+
+  it('bounds the queue by the newest chunk before the clock is synced', () => {
+    const format = sampleFormat();
+    const stream = new AudioStream(new TimeProvider(), format, 1000);
+    stream.addChunk(wireChunk(0, [0, 0], format));
+    stream.addChunk(wireChunk(3000, [0, 0], format));
+    expect(stream.chunks).toHaveLength(2);
+
+    // 6001 ms newer than the first chunk, beyond 5000 ms + the 1000 ms buffer
+    stream.addChunk(wireChunk(6001, [0, 0], format));
+    expect(stream.chunks.map((chunk) => chunk.timestamp.getMilliseconds())).toEqual([3000, 6001]);
   });
 });

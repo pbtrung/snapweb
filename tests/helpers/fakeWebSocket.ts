@@ -7,6 +7,7 @@ export class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
 
   readonly url: string;
+  binaryType: string = 'blob';
   readyState: number = FakeWebSocket.CONNECTING;
   sent: any[] = [];
   onopen: (() => void) | null = null;
@@ -27,8 +28,9 @@ export class FakeWebSocket {
     return FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
   }
 
-  send(data: string) {
-    this.sent.push(JSON.parse(data));
+  // JSON-RPC text is parsed, binary stream messages are kept as they are
+  send(data: string | ArrayBuffer) {
+    this.sent.push(typeof data === 'string' ? JSON.parse(data) : data);
   }
 
   close() {
