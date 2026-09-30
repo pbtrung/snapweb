@@ -40,8 +40,8 @@ On Android open `http://<snapserver host>:1780` in Chrome and select in the menu
 
 Screenshot is taken on a Pixel 7 emulation in Chrome DevTools
 
-![Snapweb-Dark](https://raw.githubusercontent.com/snapcast/snapweb/master/snapweb_dark.png#gh-dark-mode-only)
-![Snapweb-Light](https://raw.githubusercontent.com/snapcast/snapweb/master/snapweb_light.png#gh-light-mode-only)
+![Snapweb-Dark](docs/images/snapweb_dark.png#gh-dark-mode-only)
+![Snapweb-Light](docs/images/snapweb_light.png#gh-light-mode-only)
 
 ## Contributing
 
