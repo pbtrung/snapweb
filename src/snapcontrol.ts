@@ -35,6 +35,7 @@ interface MetadataJson {
   album?: string;
   artUrl?: string;
   duration?: number;
+  url?: string;
 }
 
 interface PropertiesJson {
@@ -187,6 +188,7 @@ namespace Snapcast {
       this.album = json.album;
       this.artUrl = json.artUrl;
       this.duration = json.duration;
+      this.url = json.url;
     }
 
     title?: string;
@@ -194,6 +196,7 @@ namespace Snapcast {
     album?: string;
     artUrl?: string;
     duration?: number;
+    url?: string;
   }
 
   export class Properties {

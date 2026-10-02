@@ -65,6 +65,15 @@ function scaleVolume(clientVolume: number, fromGroupVolume: number, toGroupVolum
   return clientVolume + (100 - clientVolume) * ((toGroupVolume - fromGroupVolume) / (100 - fromGroupVolume));
 }
 
+// Format a duration in seconds as m:ss, or h:mm:ss from one hour up
+function formatDuration(seconds: number): string {
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const ss = String(total % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
 export default function Group(props: GroupProps) {
   const [, setUpdate] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -194,6 +203,7 @@ export default function Group(props: GroupProps) {
   const metadata = stream?.properties.metadata;
   const title = metadata?.title || 'Unknown Title';
   const artist = metadata?.artist ? metadata.artist.join(', ') : 'Unknown Artist';
+  const hasDuration = metadata?.duration !== undefined && metadata.duration > 0;
 
   return (
     <div>
@@ -250,6 +260,39 @@ export default function Group(props: GroupProps) {
                 <Typography noWrap variant="body1" align="left">
                   {artist}
                 </Typography>
+                {(hasDuration || metadata.url) && (
+                  <Box
+                    component="dl"
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: 'auto 1fr',
+                      columnGap: 1,
+                      m: 0,
+                      '& dd': { m: 0 },
+                    }}
+                  >
+                    {hasDuration && (
+                      <>
+                        <Typography component="dt" variant="body2">
+                          Duration:
+                        </Typography>
+                        <Typography component="dd" variant="body2">
+                          {formatDuration(metadata.duration!)}
+                        </Typography>
+                      </>
+                    )}
+                    {metadata.url && (
+                      <>
+                        <Typography component="dt" variant="body2">
+                          Path:
+                        </Typography>
+                        <Typography component="dd" variant="body2" sx={{ wordBreak: 'break-all' }}>
+                          {metadata.url}
+                        </Typography>
+                      </>
+                    )}
+                  </Box>
+                )}
               </Stack>
             </Stack>
           )}
