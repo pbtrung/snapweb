@@ -335,6 +335,9 @@ namespace Snapcast {
 
 // Time to wait before reconnecting after the control connection is lost
 const RECONNECT_DELAY_MS = 1000;
+// The control connection is often idle for long stretches, and some proxies
+// and tunnels (e.g. Cloudflare) close idle WebSockets after 20-30 s
+const KEEPALIVE_INTERVAL_MS = 10000;
 
 class SnapControl {
   onChange: ((_this: SnapControl, _server: Snapcast.Server) => void) | null = null;
@@ -344,6 +347,7 @@ class SnapControl {
   msg_id: number = 0;
   status_req_id: number = -1;
   timer: ReturnType<typeof setTimeout> | null = null;
+  keepalive: ReturnType<typeof setInterval> | null = null;
 
   public connect(baseUrl: string) {
     this.disconnect();
@@ -354,13 +358,22 @@ class SnapControl {
       connection.onopen = () => {
         console.info('Control connected to ' + baseUrl);
         this.status_req_id = this.sendRequest('Server.GetStatus');
+        this.keepalive = setInterval(() => this.sendRequest('Server.GetRPCVersion'), KEEPALIVE_INTERVAL_MS);
         this.onConnectionChanged?.(this, true);
       };
       connection.onerror = (ev: Event) => {
         console.error('Control connection error:', ev);
       };
-      connection.onclose = () => {
-        console.info('Control disconnected, reconnecting in ' + RECONNECT_DELAY_MS + ' ms');
+      connection.onclose = (ev?: CloseEvent) => {
+        this.stopKeepalive();
+        console.info(
+          'Control disconnected (code ' +
+            ev?.code +
+            (ev?.reason ? ', ' + ev.reason : '') +
+            '), reconnecting in ' +
+            RECONNECT_DELAY_MS +
+            ' ms',
+        );
         this.onConnectionChanged?.(this, false, 'Connection lost, trying to reconnect.');
         this.timer = setTimeout(() => this.connect(baseUrl), RECONNECT_DELAY_MS);
       };
@@ -373,6 +386,7 @@ class SnapControl {
   public disconnect() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.stopKeepalive();
     const connection = this.connection;
     if (connection) {
       // Detach first, so nothing the old connection still delivers, including
@@ -386,6 +400,11 @@ class SnapControl {
       this.connection = undefined;
     }
     this.onConnectionChanged?.(this, false);
+  }
+
+  private stopKeepalive() {
+    if (this.keepalive) clearInterval(this.keepalive);
+    this.keepalive = null;
   }
 
   private onNotification(notification: Notification) {

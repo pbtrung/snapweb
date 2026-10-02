@@ -160,6 +160,32 @@ describe('SnapControl', () => {
       expect(FakeWebSocket.latest().url).toBe('ws://snapserver:1780/jsonrpc');
     });
 
+    it('keeps an idle connection alive until it drops', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      const sent = ws.sent.length;
+
+      vi.advanceTimersByTime(10000);
+      expect(ws.sent).toHaveLength(sent + 1);
+      expect(ws.lastSent()).toMatchObject({ jsonrpc: '2.0', method: 'Server.GetRPCVersion' });
+      ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', result: { major: 2, minor: 0, patch: 0 } });
+      expect(onChange).not.toHaveBeenCalled();
+
+      ws.drop();
+      vi.advanceTimersByTime(30000);
+      expect(ws.sent).toHaveLength(sent + 1);
+    });
+
+    it('stops the keepalive on disconnect', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      const sent = ws.sent.length;
+      control.disconnect();
+      vi.advanceTimersByTime(30000);
+
+      expect(ws.sent).toHaveLength(sent);
+    });
+
     it('retries when the WebSocket constructor throws', () => {
       vi.useFakeTimers();
       let attempts = 0;

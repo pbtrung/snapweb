@@ -123,8 +123,9 @@ export default function SnapWeb() {
   }
 
   function handleConnectionChanged(connected: boolean, error?: string) {
+    // The audio stream has its own connection and reconnects by itself, so
+    // playback carries on while the control connection is re-established
     if (!connected) {
-      setIsPlaying(false);
       setServer(new Snapcast.Server());
       if (error) setConnectError(error);
     }
@@ -254,7 +255,11 @@ export default function SnapWeb() {
             onClose={(apply: boolean) => {
               setSettingsOpen(false);
               if (apply) {
-                if (config.baseUrl !== serverUrl) setServer(new Snapcast.Server());
+                if (config.baseUrl !== serverUrl) {
+                  // The audio stream is still connected to the old server
+                  setIsPlaying(false);
+                  setServer(new Snapcast.Server());
+                }
                 setServerUrl(config.baseUrl);
                 setTheme(config.theme);
                 setShowOffline(config.showOffline);

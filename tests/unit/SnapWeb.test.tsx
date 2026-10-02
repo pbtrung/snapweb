@@ -312,6 +312,38 @@ describe('SnapWeb', () => {
     });
   });
 
+  it('keeps playing while the control connection reconnects', async () => {
+    render(<SnapWeb />);
+    const ws = connect();
+    await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
+    await waitFor(() => expect(snapStream.created).toHaveLength(1));
+
+    vi.useFakeTimers();
+    act(() => ws.drop());
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    connect(FakeWebSocket.latest());
+
+    expect(snapStream.stop).not.toHaveBeenCalled();
+    expect(snapStream.created).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Stop playing' })).toBeInTheDocument();
+  });
+
+  it('stops playing when the server url changes in the settings', async () => {
+    render(<SnapWeb />);
+    connect();
+    await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
+    await waitFor(() => expect(snapStream.created).toHaveLength(1));
+    await openFromMenu('Settings...');
+    const host = screen.getByLabelText('Snapserver host');
+    await userEvent.clear(host);
+    await userEvent.type(host, 'ws://other:1780');
+    await userEvent.click(screen.getByRole('button', { name: 'OK' }));
+
+    expect(snapStream.stop).toHaveBeenCalled();
+  });
+
   it('offers playback again when the browser refuses to play', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValue(new Error('NotAllowedError'));
