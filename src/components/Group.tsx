@@ -32,6 +32,8 @@ import {
   SkipPrevious as SkipPreviousIcon,
   SkipNext as SkipNextIcon,
   Settings as SettingsIcon,
+  Schedule as ScheduleIcon,
+  FolderOpen as FolderOpenIcon,
 } from '@mui/icons-material';
 
 type GroupClient = {
@@ -273,8 +275,12 @@ export default function Group(props: GroupProps) {
                   >
                     {hasDuration && (
                       <>
-                        <Typography component="dt" variant="body2">
-                          Duration:
+                        <Typography
+                          component="dt"
+                          variant="body2"
+                          sx={{ display: 'flex', alignItems: 'center', height: '1lh' }}
+                        >
+                          <ScheduleIcon fontSize="inherit" titleAccess="Duration" />
                         </Typography>
                         <Typography component="dd" variant="body2">
                           {formatDuration(metadata.duration!)}
@@ -283,8 +289,12 @@ export default function Group(props: GroupProps) {
                     )}
                     {metadata.url && (
                       <>
-                        <Typography component="dt" variant="body2">
-                          Path:
+                        <Typography
+                          component="dt"
+                          variant="body2"
+                          sx={{ display: 'flex', alignItems: 'center', height: '1lh' }}
+                        >
+                          <FolderOpenIcon fontSize="inherit" titleAccess="Path" />
                         </Typography>
                         <Typography component="dd" variant="body2" sx={{ wordBreak: 'break-all' }}>
                           {metadata.url}
