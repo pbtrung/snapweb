@@ -10,7 +10,7 @@ const audio = vi.hoisted(() => {
     currentTime = 1;
     baseLatency = 0;
     closed = false;
-    sources: { started: boolean; stopped: boolean }[] = [];
+    sources: { started: boolean; stopped: boolean; when?: number }[] = [];
     destination = {};
 
     constructor(options?: { sampleRate?: number }) {
@@ -31,8 +31,10 @@ const audio = vi.hoisted(() => {
         buffer: null,
         onended: null,
         connect() {},
-        start() {
+        when: undefined as number | undefined,
+        start(when: number) {
           source.started = true;
+          source.when = when;
         },
         stop() {
           source.stopped = true;
@@ -125,6 +127,18 @@ describe('SnapStream lifecycle', () => {
     expect(audio.FakeAudioContext.instances).toHaveLength(2);
     expect(audio.FakeAudioContext.instances[0].closed).toBe(true);
     expect(audio.FakeAudioContext.instances[1].sampleRate).toBe(44100);
+  });
+
+  it('restarts playback when it fell behind the audio clock', () => {
+    const { ws } = start();
+    const ctx = audio.FakeAudioContext.instances[0];
+    receive(ws, pcmCodecHeader(48000));
+    // Three 80 ms buffers from 1.1 s, then the main thread stalled
+    ctx.currentTime = 5;
+    const first = ctx.sources[0] as any;
+    first.onended();
+
+    expect(ctx.sources[3].when).toBeCloseTo(5.1);
   });
 
   it('releases the audio context and socket on stop', () => {

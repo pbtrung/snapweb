@@ -35,6 +35,11 @@ const SYNC_BURST_SPACING_MS = 25;
 const SYNC_WINDOW = 100; // offsets the median is taken over
 const SYNC_MIN_SAMPLES = 3; // enough for the median to ignore one outlier
 
+// Audio clock: offsets are sampled once per buffer
+const CLOCK_WINDOW = 25; // offsets the median is taken over, about 2 s
+const CLOCK_JUMP_THRESHOLD_MS = 20; // well above the few ms of jitter
+const CLOCK_JUMP_SAMPLES = 3; // consecutive offsets beyond it that mean a jump
+
 const RECONNECT_DELAY_MS = 1000;
 
 declare global {
@@ -44,9 +49,11 @@ declare global {
   }
 }
 
-// declare AudioContext.outputLatency for the ts compiler
+// declare AudioContext.outputLatency and getOutputTimestamp for the ts
+// compiler; standardized-audio-context wraps neither
 interface IAudioContextPatched extends IAudioContext {
   readonly outputLatency: number;
+  getOutputTimestamp(): AudioTimestamp | undefined;
 }
 
 class AudioContextPatched extends AudioContext implements IAudioContextPatched {
@@ -57,6 +64,16 @@ class AudioContextPatched extends AudioContext implements IAudioContextPatched {
     }
     return 0;
   }
+
+  // Not supported by older Safari
+  getOutputTimestamp(): AudioTimestamp | undefined {
+    return (<any>this)._nativeAudioContext?.getOutputTimestamp?.();
+  }
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
 }
 
 function getChromeVersion(): number | null {
@@ -369,11 +386,16 @@ class AudioStream {
   // number of silent frames written at the start of left and right.
   private hardSync(serverPlayTimeMs: number, left: Float32Array, right: Float32Array): number {
     let age = serverPlayTimeMs - this.chunk!.startMs();
+    // One line per sync, not per chunk: a clock jump drops dozens at once
+    const oldestAge = age;
+    let dropped = 0;
     while (this.chunk && age > this.chunk.duration()) {
-      console.debug('Chunk too old, dropping (age: ' + age.toFixed(2) + ' ms)');
+      dropped++;
       this.chunk = this.chunks.shift();
       if (this.chunk) age = serverPlayTimeMs - this.chunk.startMs();
     }
+    if (dropped > 0)
+      console.debug('Dropped ' + dropped + ' chunks too old to play (oldest age: ' + oldestAge.toFixed(2) + ' ms)');
     if (!this.chunk) return 0;
     if (age > 0) {
       this.chunk.readFrames(Math.floor(age * this.chunk.sampleFormat.msRate()));
@@ -387,9 +409,10 @@ class AudioStream {
 
   getNextBuffer(buffer: IAudioBuffer, playTimeMs: number) {
     const frames = buffer.length;
-    if (!this._timeProvider.isSynced()) {
-      // Without a server time we can't tell which chunk is due, so play
-      // silence instead of dropping or skipping chunks
+    if (!this._timeProvider.isSynced() || !Number.isFinite(playTimeMs)) {
+      // Without a server time, or before the audio clock runs, we can't tell
+      // which chunk is due, so play silence instead of dropping or skipping
+      // chunks
       buffer.getChannelData(0).fill(0);
       buffer.getChannelData(1).fill(0);
       return;
@@ -462,22 +485,14 @@ class AudioStream {
   }
 }
 
+// Syncs the performance clock to the server clock. The performance clock
+// keeps running when audio output stalls, unlike the audio clock, so the
+// offset stays valid; AudioClock maps audio time onto it.
 class TimeProvider {
-  constructor(ctx?: IAudioContextPatched) {
-    if (ctx) {
-      this.setAudioContext(ctx);
-    }
-  }
-
-  setAudioContext(ctx: IAudioContextPatched) {
-    this.ctx = ctx;
-    this.reset();
-  }
-
   reset() {
     this.diffBuffer.length = 0;
     this.diff = 0;
-    // Replies to requests sent before now were measured on another clock
+    // Replies to requests sent before now may be from another server
     this.pendingRequests.clear();
   }
 
@@ -498,31 +513,13 @@ class TimeProvider {
     return this.diffBuffer.length >= SYNC_MIN_SAMPLES;
   }
 
-  // The audio clock reads 0 until it runs, which makes samples meaningless
-  isRunning(): boolean {
-    return this.now() !== 0;
-  }
-
   setDiff(c2s: number, s2c: number) {
-    if (!this.isRunning()) return;
     if (this.diffBuffer.push((c2s - s2c) / 2) > SYNC_WINDOW) this.diffBuffer.shift();
-    const sorted = [...this.diffBuffer];
-    sorted.sort((a, b) => a - b);
-    this.diff = sorted[Math.floor(sorted.length / 2)];
+    this.diff = median(this.diffBuffer);
   }
 
   now() {
-    if (!this.ctx) {
-      return window.performance.now();
-    }
-    // Use currentTime, the clock buffers are scheduled on. The output
-    // latency is added once when scheduling. getOutputTimestamp() would
-    // already include it, counting it twice.
-    return this.ctx.currentTime * 1000;
-  }
-
-  nowSec() {
-    return this.now() / 1000;
+    return window.performance.now();
   }
 
   serverNow() {
@@ -536,7 +533,53 @@ class TimeProvider {
   diffBuffer: Array<number> = new Array<number>();
   diff: number = 0;
   pendingRequests: Set<number> = new Set<number>();
-  ctx?: AudioContext;
+}
+
+// Maps audio context time, which buffers are scheduled on, to the
+// performance time they are heard at. The audio clock pauses when the
+// context suspends or the output device stalls while the performance clock
+// keeps running, so the offset between them jumps; a median over a short
+// window absorbs jitter and drift, and a jump replaces the window at once.
+class AudioClock {
+  constructor(private ctx: IAudioContextPatched) {}
+
+  // Performance time in ms at which audio scheduled at contextTime is
+  // heard, or NaN until the audio clock runs
+  toPerformanceTime(contextTime: number): number {
+    this.update();
+    return this.offsets.length > 0 ? contextTime * 1000 + this.offset : NaN;
+  }
+
+  // performance ms minus context ms of the same heard moment
+  private sample(): number | undefined {
+    const ts = this.ctx.getOutputTimestamp();
+    // Both are 0 until output starts
+    if (ts && ts.contextTime! > 0 && ts.performanceTime! > 0) return ts.performanceTime! - ts.contextTime! * 1000;
+    if (this.ctx.currentTime === 0) return undefined;
+    // What plays now at currentTime is heard after the output latency
+    const latency = (this.ctx.baseLatency ?? 0) + (this.ctx.outputLatency ?? 0);
+    return window.performance.now() - (this.ctx.currentTime - latency) * 1000;
+  }
+
+  private update() {
+    const sample = this.sample();
+    if (sample === undefined) return;
+    if (this.offsets.length > 0 && Math.abs(sample - this.offset) > CLOCK_JUMP_THRESHOLD_MS) {
+      // One stray offset is noise, several in a row mean the clock jumped
+      if (this.jumpOffsets.push(sample) < CLOCK_JUMP_SAMPLES) return;
+      const jumped = median(this.jumpOffsets);
+      console.info('Audio clock jumped by ' + (jumped - this.offset).toFixed(1) + ' ms, resyncing');
+      this.offsets = this.jumpOffsets;
+    } else if (this.offsets.push(sample) > CLOCK_WINDOW) {
+      this.offsets.shift();
+    }
+    this.jumpOffsets = [];
+    this.offset = median(this.offsets);
+  }
+
+  offset: number = 0;
+  offsets: number[] = [];
+  private jumpOffsets: number[] = [];
 }
 
 class SampleFormat {
@@ -850,6 +893,7 @@ class SnapStream {
       options = undefined;
     }
     this.ctx = new AudioContextPatched(options);
+    this.audioClock = new AudioClock(this.ctx);
     this.gainNode = this.ctx.createGain();
     this.gainNode.connect(this.ctx.destination);
     return true;
@@ -874,7 +918,9 @@ class SnapStream {
       hello.hostname = 'Snapweb client';
       hello.uniqueId = SnapStream.getClientId();
       this.sendMessage(hello);
-      this.syncTime();
+      // The server may have restarted with another clock
+      this.timeProvider.reset();
+      this.syncBurst();
       this.syncHandle = window.setInterval(() => this.syncTime(), SYNC_INTERVAL_MS);
     };
     socket.onerror = (ev) => {
@@ -943,8 +989,6 @@ class SnapStream {
     }
 
     this.ctx.resume();
-    this.timeProvider.setAudioContext(this.ctx);
-    this.syncBurst();
     this.applyVolume();
     this.stream = new AudioStream(this.timeProvider, sampleFormat, this.bufferMs);
     this.play();
@@ -992,15 +1036,13 @@ class SnapStream {
   }
 
   private syncTime() {
-    // A request sent before the audio clock runs would carry a 0 timestamp
-    if (!this.timeProvider.isRunning()) return;
     const t = new TimeMessage();
     t.latency.setMilliseconds(this.timeProvider.now());
     this.sendMessage(t);
     this.timeProvider.trackRequest(t.id);
   }
 
-  // Sync quickly after switching clocks instead of waiting for the interval
+  // Sync quickly after connecting instead of waiting for the interval
   private syncBurst() {
     this.clearSyncBurst();
     for (let i = 0; i < SYNC_BURST_COUNT; ++i)
@@ -1052,7 +1094,7 @@ class SnapStream {
   }
 
   public play() {
-    this.playTime = this.timeProvider.nowSec() + PLAY_START_DELAY_S;
+    this.playTime = this.ctx.currentTime + PLAY_START_DELAY_S;
     for (let i = 0; i < AUDIO_BUFFER_COUNT; ++i) {
       this.playNext();
     }
@@ -1063,9 +1105,15 @@ class SnapStream {
     const buffer =
       this.freeBuffers.pop() ||
       this.ctx.createBuffer(this.sampleFormat.channels, this.bufferFrameCount, this.sampleFormat.rate);
-    // Read every time, since the output device (and its latency) can change
-    const latency = (this.ctx.baseLatency ?? 0) + (this.ctx.outputLatency ?? 0);
-    const playTimeMs = (this.playTime + latency) * 1000 - this.bufferMs;
+    // A buffer scheduled in the past, after the main thread stalled, would
+    // start late and play out of sync, so start the chain over
+    if (this.playTime < this.ctx.currentTime) {
+      console.info('Playback fell behind, restarting it');
+      this.playTime = this.ctx.currentTime + PLAY_START_DELAY_S;
+    }
+    // Map every time, since the audio clock can stall and the output device
+    // (and its latency) can change
+    const playTimeMs = this.audioClock.toPerformanceTime(this.playTime) - this.bufferMs;
     this.stream.getNextBuffer(buffer, playTimeMs);
 
     const source = this.ctx.createBufferSource();
@@ -1092,6 +1140,7 @@ class SnapStream {
   freeBuffers: Array<IAudioBuffer> = new Array<IAudioBuffer>();
 
   timeProvider: TimeProvider;
+  audioClock!: AudioClock;
   stream: AudioStream | undefined;
   ctx!: IAudioContextPatched;
   gainNode!: IGainNode<IAudioContext>;
@@ -1102,4 +1151,14 @@ class SnapStream {
 }
 
 export { SnapStream };
-export { AudioStream, JsonMessage, HelloMessage, PcmChunkMessage, SampleFormat, TimeMessage, TimeProvider, Tv };
+export {
+  AudioClock,
+  AudioStream,
+  JsonMessage,
+  HelloMessage,
+  PcmChunkMessage,
+  SampleFormat,
+  TimeMessage,
+  TimeProvider,
+  Tv,
+};

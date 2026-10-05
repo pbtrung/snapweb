@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AudioClock,
   AudioStream,
   HelloMessage,
   JsonMessage,
@@ -114,28 +115,7 @@ describe('TimeProvider', () => {
     expect(provider.diff).toBe(100);
   });
 
-  it('ignores samples while the clock is not running, keeping earlier ones', () => {
-    const provider = new TimeProvider();
-    const now = vi.spyOn(provider, 'now').mockReturnValue(1000);
-    provider.setDiff(20, 0);
-    expect(provider.diff).toBe(10);
-
-    now.mockReturnValue(0);
-    expect(provider.isRunning()).toBe(false);
-    provider.setDiff(40, 0);
-    expect(provider.diff).toBe(10);
-    expect(provider.diffBuffer).toEqual([10]);
-  });
-
-  it('uses the audio context clock that buffers are scheduled on', () => {
-    const provider = new TimeProvider();
-    // getOutputTimestamp would already include the output latency
-    provider.setAudioContext({ currentTime: 2, getOutputTimestamp: () => ({ contextTime: 1.5 }) } as any);
-    expect(provider.now()).toBe(2000);
-    expect(provider.nowSec()).toBe(2);
-  });
-
-  it('falls back to performance.now without an audio context', () => {
+  it('uses the performance clock, which keeps running when audio stalls', () => {
     vi.spyOn(window.performance, 'now').mockReturnValue(1234);
     expect(new TimeProvider().now()).toBe(1234);
   });
@@ -168,16 +148,104 @@ describe('TimeProvider', () => {
     expect(provider.handleReply(7, 20, 0)).toBe(true);
   });
 
-  it('drops replies to requests sent on the previous clock', () => {
+  it('drops replies to requests sent before a reset', () => {
     const provider = new TimeProvider();
     vi.spyOn(provider, 'now').mockReturnValue(1000);
     provider.trackRequest(1);
     provider.setDiff(20, 0);
 
-    provider.setAudioContext({ currentTime: 1 } as any);
+    provider.reset();
     expect(provider.diffBuffer).toEqual([]);
     expect(provider.isSynced()).toBe(false);
     expect(provider.handleReply(1, 20, 0)).toBe(false);
+  });
+});
+
+describe('AudioClock', () => {
+  // An audio context whose output timestamp offset is set per test
+  function fakeContext() {
+    return {
+      currentTime: 0,
+      baseLatency: 0,
+      outputLatency: 0,
+      timestamp: undefined as AudioTimestamp | undefined,
+      getOutputTimestamp() {
+        return this.timestamp;
+      },
+    };
+  }
+
+  // Outputs at contextTime 10 s, heard at performance time 10000 + offset ms
+  function heardWithOffset(offset: number): AudioTimestamp {
+    return { contextTime: 10, performanceTime: 10000 + offset };
+  }
+
+  it('is not mapped until the audio clock runs', () => {
+    const clock = new AudioClock(fakeContext() as any);
+    expect(clock.toPerformanceTime(1)).toBeNaN();
+  });
+
+  it('maps context time to the performance time it is heard at', () => {
+    const ctx = fakeContext();
+    ctx.timestamp = heardWithOffset(500);
+    expect(new AudioClock(ctx as any).toPerformanceTime(12)).toBe(12500);
+  });
+
+  it('falls back to currentTime and the output latency without output timestamps', () => {
+    const ctx = fakeContext();
+    ctx.currentTime = 10;
+    ctx.outputLatency = 0.2;
+    vi.spyOn(window.performance, 'now').mockReturnValue(10300);
+    // Played now at 10 s, heard 200 ms later, at 10500
+    expect(new AudioClock(ctx as any).toPerformanceTime(10)).toBeCloseTo(10500);
+  });
+
+  it('uses the median offset, ignoring jitter', () => {
+    const ctx = fakeContext();
+    const clock = new AudioClock(ctx as any);
+    for (const offset of [500, 503, 498, 501, 499]) {
+      ctx.timestamp = heardWithOffset(offset);
+      clock.toPerformanceTime(0);
+    }
+    expect(clock.offset).toBe(500);
+  });
+
+  it('ignores a single stray offset', () => {
+    const ctx = fakeContext();
+    const clock = new AudioClock(ctx as any);
+    for (const offset of [500, 500, 900, 500]) {
+      ctx.timestamp = heardWithOffset(offset);
+      clock.toPerformanceTime(0);
+    }
+    expect(clock.offset).toBe(500);
+    expect(clock.offsets).toEqual([500, 500, 500]);
+  });
+
+  it('follows a jump at once when several offsets in a row agree', () => {
+    const ctx = fakeContext();
+    const clock = new AudioClock(ctx as any);
+    for (let i = 0; i < 20; ++i) {
+      ctx.timestamp = heardWithOffset(500);
+      clock.toPerformanceTime(0);
+    }
+    // The audio clock paused for a second
+    for (const offset of [1500, 1502, 1499]) {
+      ctx.timestamp = heardWithOffset(offset);
+      clock.toPerformanceTime(0);
+    }
+    expect(clock.offset).toBe(1500);
+    expect(clock.offsets).toEqual([1500, 1502, 1499]);
+  });
+
+  it('keeps only the last 25 offsets', () => {
+    const ctx = fakeContext();
+    const clock = new AudioClock(ctx as any);
+    for (let i = 0; i < 40; ++i) {
+      ctx.timestamp = heardWithOffset(500 + i * 0.1);
+      clock.toPerformanceTime(0);
+    }
+    expect(clock.offsets).toHaveLength(25);
+    expect(clock.offsets[0]).toBeCloseTo(501.5);
   });
 });
 
@@ -208,6 +276,19 @@ describe('AudioStream', () => {
     expect(Array.from(buffer.channels[1])).toEqual([0, 0, 0, 0]);
     expect(stream.chunks).toEqual([chunk]);
     expect(stream.chunk).toBeUndefined();
+  });
+
+  it('plays silence and keeps its chunks until the audio clock runs', () => {
+    const provider = new TimeProvider();
+    vi.spyOn(provider, 'isSynced').mockReturnValue(true);
+    const stream = new AudioStream(provider, new SampleFormat(), 1000);
+    const chunk = { startMs: () => 0 } as any;
+    stream.chunks.push(chunk);
+    const buffer = fakeBuffer(4);
+    stream.getNextBuffer(buffer as any, NaN);
+
+    expect(Array.from(buffer.channels[0])).toEqual([0, 0, 0, 0]);
+    expect(stream.chunks).toEqual([chunk]);
   });
 });
 
