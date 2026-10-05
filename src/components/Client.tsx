@@ -1,21 +1,8 @@
-import React from 'react';
 import { useState } from 'react';
+import { Button, Col, Form, InputGroup, Modal, Row } from 'react-bootstrap';
+import { EllipsisVertical, Trash2 } from 'lucide-react';
 import { SnapControl, Snapcast } from '../snapcontrol';
-import {
-  Box,
-  Button,
-  Grid,
-  InputAdornment,
-  Menu,
-  MenuItem,
-  Slider,
-  Stack,
-  TextField,
-  Typography,
-  IconButton,
-} from '@mui/material';
-import { Dialog, DialogActions, DialogContent, DialogTitle } from '@mui/material';
-import { VolumeUp as VolumeUpIcon, VolumeOff as VolumeOffIcon, MoreVert as MoreVertIcon } from '@mui/icons-material';
+import VolumeControl from './VolumeControl';
 
 type ClientProps = {
   client: Snapcast.Client;
@@ -27,8 +14,7 @@ type ClientProps = {
 export default function Client(props: ClientProps) {
   const client = props.client;
   const [, setUpdate] = useState(0);
-  const [menuAnchor, setMenuAnchor] = useState<Element | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [name, setName] = useState(client.config.name);
   // The latency is applied live while editing, and restored on Cancel
   const [tmpLatency, setTmpLatency] = useState(client.config.latency);
@@ -48,15 +34,20 @@ export default function Client(props: ClientProps) {
     setUpdate((u) => u + 1);
   }
 
-  function handleOptionsClicked(event: React.MouseEvent<HTMLButtonElement>) {
-    setMenuAnchor(event.currentTarget);
+  function handleSettingsClicked() {
     setName(client.config.name);
     setTmpLatency(client.config.latency);
     setLatency(client.config.latency);
+    setSettingsOpen(true);
   }
 
-  function handleDetailsClose(apply: boolean) {
-    setDetailsOpen(false);
+  function handleDeleteClicked() {
+    handleSettingsClose(false);
+    props.onDelete();
+  }
+
+  function handleSettingsClose(apply: boolean) {
+    setSettingsOpen(false);
     if (apply) {
       props.snapcontrol.setClientName(client.id, name);
       props.snapcontrol.setClientLatency(client.id, tmpLatency);
@@ -81,114 +72,101 @@ export default function Client(props: ClientProps) {
     ['Host', client.host.name],
     ['OS', client.host.os],
   ];
-  const optionsId = 'client-options-' + client.id;
+  const idPrefix = 'client-' + client.id;
 
   return (
-    <Box sx={{ opacity: client.connected ? 1.0 : 0.5 }}>
-      <Grid container spacing={2} sx={{ justifyContent: 'center', alignItems: 'center' }}>
-        <Grid size="grow">
-          <Stack spacing={-1} direction="column">
-            <Typography variant="subtitle1" align="left" gutterBottom>
-              {displayName}
-            </Typography>
-            <Stack spacing={2} direction="row" sx={{ alignItems: 'center' }}>
-              <IconButton
-                aria-label={'Mute ' + displayName}
-                aria-pressed={client.config.volume.muted}
-                onClick={handleMuteClicked}
-              >
-                {client.config.volume.muted ? <VolumeOffIcon /> : <VolumeUpIcon />}
-              </IconButton>
-              <Slider
-                aria-label={displayName + ' volume'}
-                color="secondary"
-                min={0}
-                max={100}
-                size="small"
-                value={client.config.volume.percent}
-                onChange={(_, value) => handleVolumeChange(value as number)}
-              />
-            </Stack>
-          </Stack>
-        </Grid>
-        <Grid>
-          <IconButton id={optionsId} aria-label={displayName + ' options'} onClick={handleOptionsClicked}>
-            <MoreVertIcon />
-          </IconButton>
-          <Menu
-            anchorEl={menuAnchor}
-            open={menuAnchor !== null}
-            onClose={() => setMenuAnchor(null)}
-            slotProps={{ list: { 'aria-labelledby': optionsId } }}
-          >
-            <MenuItem
-              onClick={() => {
-                setDetailsOpen(true);
-                setMenuAnchor(null);
-              }}
-            >
-              Details
-            </MenuItem>
+    <li className="list-group-item px-3 py-2" style={{ opacity: client.connected ? 1.0 : 0.5 }}>
+      <div className="d-flex align-items-center gap-2">
+        <div className="flex-grow-1" style={{ minWidth: 0 }}>
+          <div className="d-flex align-items-center gap-2 ps-1">
+            <span className="client-name text-truncate">{displayName}</span>
             {!client.connected && (
-              <MenuItem
-                onClick={() => {
-                  props.onDelete();
-                  setMenuAnchor(null);
-                }}
-              >
-                Delete
-              </MenuItem>
+              <span className="badge rounded-pill text-bg-secondary fw-normal flex-shrink-0">offline</span>
             )}
-          </Menu>
-        </Grid>
-      </Grid>
-      <Dialog open={detailsOpen} onClose={() => handleDetailsClose(false)}>
-        <DialogTitle>Client settings</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Name"
-            type="text"
-            fullWidth
-            variant="standard"
-            onChange={(event: React.ChangeEvent<HTMLInputElement>) => setName(event.target.value)}
-            value={name}
+          </div>
+          <VolumeControl
+            label={displayName}
+            volume={client.config.volume.percent}
+            muted={client.config.volume.muted}
+            onMuteClick={handleMuteClicked}
+            onChange={handleVolumeChange}
           />
-          <TextField
-            margin="dense"
-            label="Latency"
-            type="number"
-            fullWidth
-            value={tmpLatency}
-            onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-              handleLatencyChange(Number(event.target.value) || 0)
-            }
-            variant="standard"
-            slotProps={{
-              input: {
-                endAdornment: <InputAdornment position="end">ms</InputAdornment>,
-              },
-            }}
-          />
-          {readOnlyFields.map(([label, value]) => (
-            <TextField
-              key={label}
-              margin="dense"
-              label={label}
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost btn-icon"
+          aria-label={'Settings for ' + displayName}
+          onClick={handleSettingsClicked}
+        >
+          <EllipsisVertical size={20} />
+        </button>
+      </div>
+      <Modal
+        show={settingsOpen}
+        onHide={() => handleSettingsClose(false)}
+        centered
+        aria-labelledby={idPrefix + '-title'}
+      >
+        <Modal.Header closeButton>
+          <Modal.Title id={idPrefix + '-title'} as="h5">
+            Client settings
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form.Group className="mb-3" controlId={idPrefix + '-name'}>
+            <Form.Label>Name</Form.Label>
+            <Form.Control
+              autoFocus
               type="text"
-              fullWidth
-              variant="standard"
-              value={value}
-              slotProps={{ input: { readOnly: true } }}
+              spellCheck={false}
+              placeholder={client.host.name}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
             />
-          ))}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => handleDetailsClose(false)}>Cancel</Button>
-          <Button onClick={() => handleDetailsClose(true)}>OK</Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+          </Form.Group>
+          <Form.Group className="mb-3" controlId={idPrefix + '-latency'}>
+            <Form.Label>Latency</Form.Label>
+            <InputGroup>
+              <Form.Control
+                type="number"
+                value={tmpLatency}
+                onChange={(event) => handleLatencyChange(Number(event.target.value) || 0)}
+              />
+              <InputGroup.Text>ms</InputGroup.Text>
+            </InputGroup>
+          </Form.Group>
+          <div className="border-top pt-2">
+            {readOnlyFields.map(([label, value]) => (
+              <Form.Group as={Row} key={label} className="g-2" controlId={idPrefix + '-' + label}>
+                <Form.Label column xs={3} className="text-body-secondary small">
+                  {label}
+                </Form.Label>
+                <Col xs={9}>
+                  <Form.Control plaintext readOnly className="small font-monospace" value={value} />
+                </Col>
+              </Form.Group>
+            ))}
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          {!client.connected && (
+            <Button
+              variant="outline-danger"
+              className="me-auto d-inline-flex align-items-center gap-2"
+              onClick={handleDeleteClicked}
+            >
+              <Trash2 size={16} aria-hidden="true" />
+              Delete
+            </Button>
+          )}
+          <Button variant="outline-secondary" onClick={() => handleSettingsClose(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => handleSettingsClose(true)}>
+            OK
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </li>
   );
 }

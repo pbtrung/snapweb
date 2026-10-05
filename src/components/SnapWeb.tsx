@@ -1,81 +1,33 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
+import { Alert, Button, Spinner } from 'react-bootstrap';
+import { Play, Settings, Square } from 'lucide-react';
 import Server from './Server';
-import AboutDialog from './AboutDialog';
 import SettingsDialog from './Settings';
-import useMediaQuery from '@mui/material/useMediaQuery';
 import { Theme, config, getClientId } from '../config';
 import { SnapControl, Snapcast } from '../snapcontrol';
 import type { SnapStream } from '../snapstream';
-import {
-  AppBar,
-  Box,
-  Drawer,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemText,
-  Toolbar,
-  Typography,
-  IconButton,
-  Snackbar,
-  Alert,
-  Button,
-} from '@mui/material';
-import { PlayArrow as PlayArrowIcon, Stop as StopIcon, Menu as MenuIcon } from '@mui/icons-material';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
+import logo from '../assets/logo192.png';
 import silence from '../assets/10-seconds-of-silence.mp3';
 import { updateMediaSession } from '../mediaSession';
 
-function makeTheme(mode: 'light' | 'dark') {
-  return createTheme({
-    palette: {
-      mode,
-      primary: {
-        light: '#757ce8',
-        main: '#607d8b',
-        dark: '#002884',
-        contrastText: '#fff',
-      },
-      secondary: {
-        light: '#ff7961',
-        main: '#f44336',
-        dark: '#ba000d',
-        contrastText: '#000',
-      },
-    },
-    typography: {
-      subtitle1: {
-        fontSize: 17,
-      },
-      body1: {
-        fontWeight: 500,
-      },
-      h5: {
-        fontWeight: 300,
-      },
-    },
-    components: {
-      MuiTextField: {
-        defaultProps: {
-          spellCheck: false,
-        },
-      },
-    },
-  });
+const darkQuery = '(prefers-color-scheme: dark)';
+
+function subscribeToColorScheme(onChange: () => void) {
+  const query = window.matchMedia(darkQuery);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
 }
 
-const lightTheme = makeTheme('light');
-const darkTheme = makeTheme('dark');
+function prefersDarkColorScheme() {
+  return window.matchMedia(darkQuery).matches;
+}
 
 export default function SnapWeb() {
   const [, setUpdate] = useState(0);
   const [server, setServer] = useState(new Snapcast.Server());
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [showOffline, setShowOffline] = useState(config.showOffline);
   const [theme, setTheme] = useState(config.theme);
   const [serverUrl, setServerUrl] = useState(config.baseUrl);
-  const [aboutOpen, setAboutOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isConnected, setConnected] = useState(false);
@@ -94,7 +46,12 @@ export default function SnapWeb() {
     return control;
   });
 
-  const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
+  const prefersDarkMode = useSyncExternalStore(subscribeToColorScheme, prefersDarkColorScheme);
+  const colorScheme = theme == Theme.Dark || (theme == Theme.System && prefersDarkMode) ? 'dark' : 'light';
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-bs-theme', colorScheme);
+  }, [colorScheme]);
 
   useEffect(() => {
     snapControl.connect(serverUrl);
@@ -166,108 +123,79 @@ export default function SnapWeb() {
     };
   }, [isPlaying]);
 
-  function connectionSnackbar() {
+  function connectionAlert() {
     if (isConnected) return null;
     return (
-      <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-        <Alert
-          severity={connectError ? 'error' : 'info'}
-          sx={{ width: '100%' }}
-          action={
-            <Button color="inherit" size="small" onClick={() => setSettingsOpen(true)}>
-              Settings
-            </Button>
-          }
-        >
-          <div>{connectError || 'Connecting...'}</div>
-          <div>Snapserver host: {serverUrl}</div>
+      <div className="notice-stack">
+        <Alert variant={connectError ? 'danger' : 'light'} className="d-flex align-items-center gap-3 py-2 pe-2">
+          {!connectError && <Spinner animation="border" size="sm" className="flex-shrink-0" aria-hidden="true" />}
+          <div className="flex-grow-1 overflow-hidden">
+            <div className="fw-semibold">{connectError || 'Connecting...'}</div>
+            <div className="small text-truncate opacity-75">Snapserver host: {serverUrl}</div>
+          </div>
+          <Button
+            variant="link"
+            size="sm"
+            className="fw-semibold text-decoration-none"
+            onClick={() => setSettingsOpen(true)}
+          >
+            Settings
+          </Button>
         </Alert>
-      </Snackbar>
+      </div>
     );
   }
 
   return (
-    <ThemeProvider theme={theme == Theme.Dark || (theme == Theme.System && prefersDarkMode) ? darkTheme : lightTheme}>
-      <CssBaseline />
-      <div className="SnapWeb">
-        <AppBar position="sticky">
-          <Toolbar>
-            <IconButton
-              size="large"
-              edge="start"
-              color="inherit"
-              aria-label="menu"
-              sx={{ mr: 2 }}
-              onClick={() => setDrawerOpen(true)}
+    <>
+      <header className="app-header sticky-top border-bottom">
+        <nav className="app-main container-fluid d-flex align-items-center gap-2 px-3 py-2">
+          <img src={logo} alt="" className="app-logo" />
+          <span className="fs-5 fw-semibold me-auto">Snapcast</span>
+          <div className="btn-group header-actions" role="group" aria-label="Actions">
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-icon"
+              aria-label="Open settings"
+              onClick={() => setSettingsOpen(true)}
             >
-              <MenuIcon />
-            </IconButton>
-            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-              Snapcast
-            </Typography>
+              <Settings size={18} />
+            </button>
             {isConnected && (
-              <IconButton
-                size="large"
-                edge="start"
-                color="inherit"
+              <button
+                type="button"
+                className={'btn btn-icon ' + (isPlaying ? 'btn-primary' : 'btn-outline-primary')}
                 aria-label={isPlaying ? 'Stop playing' : 'Play on this device'}
-                sx={{ mr: 2 }}
+                aria-pressed={isPlaying}
                 onClick={() => setIsPlaying(!isPlaying)}
               >
-                {isPlaying ? <StopIcon fontSize="large" /> : <PlayArrowIcon fontSize="large" />}
-              </IconButton>
+                {isPlaying ? <Square size={16} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+              </button>
             )}
-          </Toolbar>
-        </AppBar>
-        <Drawer anchor="top" open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-          <Box role="presentation" sx={{ mt: 1 }}>
-            <List>
-              <ListItem disablePadding>
-                <ListItemButton
-                  onClick={() => {
-                    setAboutOpen(true);
-                    setDrawerOpen(false);
-                  }}
-                >
-                  <ListItemText primary="About..." />
-                </ListItemButton>
-              </ListItem>
-              <ListItem disablePadding>
-                <ListItemButton
-                  onClick={() => {
-                    setSettingsOpen(true);
-                    setDrawerOpen(false);
-                  }}
-                >
-                  <ListItemText primary="Settings..." />
-                </ListItemButton>
-              </ListItem>
-            </List>
-          </Box>
-        </Drawer>
-        <Server server={server} snapcontrol={snapControl} showOffline={showOffline} />
-        {connectionSnackbar()}
-        <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-        {/* Mounted only while open, so it starts from the saved settings each time */}
-        {settingsOpen && (
-          <SettingsDialog
-            open
-            onClose={(apply: boolean) => {
-              setSettingsOpen(false);
-              if (apply) {
-                if (config.baseUrl !== serverUrl) {
-                  // The audio stream is still connected to the old server
-                  setIsPlaying(false);
-                  setServer(new Snapcast.Server());
-                }
-                setServerUrl(config.baseUrl);
-                setTheme(config.theme);
-                setShowOffline(config.showOffline);
+          </div>
+        </nav>
+      </header>
+      <Server server={server} snapcontrol={snapControl} showOffline={showOffline} />
+      {connectionAlert()}
+      {/* Mounted only while open, so it starts from the saved settings each time */}
+      {settingsOpen && (
+        <SettingsDialog
+          open
+          onClose={(apply: boolean) => {
+            setSettingsOpen(false);
+            if (apply) {
+              if (config.baseUrl !== serverUrl) {
+                // The audio stream is still connected to the old server
+                setIsPlaying(false);
+                setServer(new Snapcast.Server());
               }
-            }}
-          />
-        )}
-      </div>
-    </ThemeProvider>
+              setServerUrl(config.baseUrl);
+              setTheme(config.theme);
+              setShowOffline(config.showOffline);
+            }
+          }}
+        />
+      )}
+    </>
   );
 }

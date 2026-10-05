@@ -1,5 +1,24 @@
 # Snapweb changelog
 
+## Unreleased
+
+### Features
+
+- Redesign the UI with Bootstrap 5.3 and Lucide icons, replacing MUI:
+  group cards with a now playing panel, filled volume sliders, a segmented
+  theme switch and dark mode via Bootstrap color modes
+- Settings and local play/stop share a button group in the header
+- A client's button opens its settings directly; offline clients are deleted
+  from there
+- Hide the cover when the stream has none or it fails to load, and stack it
+  above the track details on small screens
+- Show a message when no clients are online
+
+### General
+
+- Remove the About dialog; the version is shown in the Settings dialog
+- Remove dead code: unused type exports and the pointer capture test shim
+
 ## Version 0.999
 
 ### Bugfixes

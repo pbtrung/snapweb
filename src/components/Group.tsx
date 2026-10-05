@@ -1,40 +1,9 @@
-import React, { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { Clock, FolderOpen, Pause, Play, Settings2, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
-import logo from '../assets/logo192.png';
+import VolumeControl from './VolumeControl';
 import { SnapControl, Snapcast } from '../snapcontrol';
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardMedia,
-  Checkbox,
-  Divider,
-  FormControl,
-  FormControlLabel,
-  FormGroup,
-  Grid,
-  MenuItem,
-  Select,
-  Slider,
-  Snackbar,
-  Stack,
-  TextField,
-  Typography,
-  IconButton,
-} from '@mui/material';
-import { Dialog, DialogActions, DialogContent, DialogTitle } from '@mui/material';
-import {
-  VolumeUp as VolumeUpIcon,
-  VolumeOff as VolumeOffIcon,
-  PlayArrow as PlayArrowIcon,
-  Pause as PauseIcon,
-  SkipPrevious as SkipPreviousIcon,
-  SkipNext as SkipNextIcon,
-  Settings as SettingsIcon,
-  Schedule as ScheduleIcon,
-  FolderOpen as FolderOpenIcon,
-} from '@mui/icons-material';
 
 type GroupClient = {
   client: Snapcast.Client;
@@ -76,11 +45,42 @@ function formatDuration(seconds: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
+// "Deleted <client>" with Undo; the client is deleted when it times out or is dismissed
+function UndoDeleteNotice(props: { name: string; onClose: (undo: boolean) => void }) {
+  const onCloseRef = useRef(props.onClose);
+  useEffect(() => {
+    onCloseRef.current = props.onClose;
+  });
+
+  useEffect(() => {
+    const timer = setTimeout(() => onCloseRef.current(false), UNDO_DELETE_MS);
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onCloseRef.current(false);
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  return (
+    <Alert variant="dark" className="d-flex align-items-center justify-content-between gap-3 py-2 pe-2">
+      <span className="text-truncate">Deleted {props.name}</span>
+      <Button variant="link" size="sm" className="fw-semibold text-decoration-none" onClick={() => props.onClose(true)}>
+        Undo
+      </Button>
+    </Alert>
+  );
+}
+
 export default function Group(props: GroupProps) {
   const [, setUpdate] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsClients, setSettingsClients] = useState<GroupClient[]>([]);
   const [settingsStreamId, setSettingsStreamId] = useState('');
+  // Cover art that failed to load, which is hidden like a missing one
+  const [brokenArtUrl, setBrokenArtUrl] = useState('');
   // Ids, since a server update replaces the client objects
   const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
   const volumeDrag = useRef<VolumeDrag | null>(null);
@@ -138,7 +138,7 @@ export default function Group(props: GroupProps) {
     if (!deletedClientIds.includes(client.id)) setDeletedClientIds([...deletedClientIds, client.id]);
   }
 
-  function handleSnackbarClose(clientId: string, undo: boolean) {
+  function handleUndoDeleteClose(clientId: string, undo: boolean) {
     if (!undo) props.snapcontrol.deleteClient(clientId);
     setDeletedClientIds((ids) => ids.filter((id) => id !== clientId));
   }
@@ -170,35 +170,20 @@ export default function Group(props: GroupProps) {
     props.snapcontrol.control(stream.id, stream.properties.playbackStatus === 'playing' ? 'pause' : 'play');
   }
 
-  const deleteSnackbars = deletedClientIds.map((clientId) => {
-    const name = props.server.getClient(clientId)?.getName() ?? clientId;
-    return (
-      <Snackbar
-        open
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        autoHideDuration={UNDO_DELETE_MS}
-        key={'snackbar-' + clientId}
-        onClose={(_, reason) => {
-          if (reason !== 'clickaway') handleSnackbarClose(clientId, false);
-        }}
-      >
-        <Alert
-          severity="info"
-          sx={{ width: '100%' }}
-          action={
-            <Button color="inherit" size="small" onClick={() => handleSnackbarClose(clientId, true)}>
-              Undo
-            </Button>
-          }
-        >
-          Deleted {name}
-        </Alert>
-      </Snackbar>
-    );
-  });
+  const undoDeleteNotices = deletedClientIds.length > 0 && (
+    <div className="notice-stack" role="status">
+      {deletedClientIds.map((clientId) => (
+        <UndoDeleteNotice
+          key={clientId}
+          name={props.server.getClient(clientId)?.getName() ?? clientId}
+          onClose={(undo) => handleUndoDeleteClose(clientId, undo)}
+        />
+      ))}
+    </div>
+  );
 
   const clients = getClients();
-  if (clients.length === 0) return <div>{deleteSnackbars}</div>;
+  if (clients.length === 0) return <>{undoDeleteNotices}</>;
 
   const groupName = props.group.name || 'group';
   const stream = props.server.getStream(props.group.stream_id);
@@ -206,129 +191,126 @@ export default function Group(props: GroupProps) {
   const title = metadata?.title || 'Unknown Title';
   const artist = metadata?.artist ? metadata.artist.join(', ') : 'Unknown Artist';
   const hasDuration = metadata?.duration !== undefined && metadata.duration > 0;
+  const isPlaying = stream?.properties.playbackStatus === 'playing';
+  const idPrefix = 'group-' + props.group.id;
 
   return (
-    <div>
-      <Card
-        sx={{
-          p: 2,
-          my: 2,
-          flexGrow: 1,
-        }}
-      >
-        <Stack spacing={0} direction="column" sx={{ alignItems: 'left' }}>
-          <Grid container direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-            <Stack direction="row" sx={{ justifyContent: 'center', alignItems: 'center' }}>
-              <IconButton aria-label={'Settings for ' + groupName} onClick={handleSettingsClicked}>
-                <SettingsIcon />
-              </IconButton>
-
-              <FormControl variant="standard">
-                <Select
-                  value={props.group.stream_id}
-                  inputProps={{ 'aria-label': 'Active stream' }}
-                  onChange={(event) => props.snapcontrol.setStream(props.group.id, event.target.value)}
-                >
-                  {props.server.streams.map((stream) => (
-                    <MenuItem key={stream.id} value={stream.id}>
-                      {stream.id}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Stack>
-
-            {stream?.properties.canControl && (
-              <Stack direction="row" sx={{ justifyContent: 'center', alignItems: 'center' }}>
-                <IconButton aria-label="previous" onClick={() => props.snapcontrol.control(stream.id, 'previous')}>
-                  <SkipPreviousIcon />
-                </IconButton>
-                <IconButton aria-label="play/pause" onClick={() => handlePlayPauseClicked(stream)}>
-                  {stream.properties.playbackStatus === 'playing' ? <PauseIcon /> : <PlayArrowIcon />}
-                </IconButton>
-                <IconButton aria-label="next" onClick={() => props.snapcontrol.control(stream.id, 'next')}>
-                  <SkipNextIcon />
-                </IconButton>
-              </Stack>
-            )}
-          </Grid>
-          {metadata && (
-            <Stack spacing={2} direction="row" sx={{ alignItems: 'center' }}>
-              <CardMedia component="img" sx={{ width: 48 }} image={metadata.artUrl || logo} alt={title + ' cover'} />
-              <Stack spacing={0} direction="column" sx={{ justifyContent: 'center', flexGrow: 1, overflow: 'hidden' }}>
-                <Typography noWrap variant="subtitle1" align="left">
-                  {title}
-                </Typography>
-                <Typography noWrap variant="body1" align="left">
-                  {artist}
-                </Typography>
-                {(hasDuration || metadata.url) && (
-                  <Box
-                    component="dl"
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: 'auto 1fr',
-                      columnGap: 1,
-                      m: 0,
-                      '& dd': { m: 0 },
-                    }}
-                  >
-                    {hasDuration && (
-                      <>
-                        <Typography
-                          component="dt"
-                          variant="body2"
-                          sx={{ display: 'flex', alignItems: 'center', height: '1lh' }}
-                        >
-                          <ScheduleIcon fontSize="inherit" titleAccess="Duration" />
-                        </Typography>
-                        <Typography component="dd" variant="body2">
-                          {formatDuration(metadata.duration!)}
-                        </Typography>
-                      </>
-                    )}
-                    {metadata.url && (
-                      <>
-                        <Typography
-                          component="dt"
-                          variant="body2"
-                          sx={{ display: 'flex', alignItems: 'center', height: '1lh' }}
-                        >
-                          <FolderOpenIcon fontSize="inherit" titleAccess="Path" />
-                        </Typography>
-                        <Typography component="dd" variant="body2" sx={{ wordBreak: 'break-all' }}>
-                          {metadata.url}
-                        </Typography>
-                      </>
-                    )}
-                  </Box>
-                )}
-              </Stack>
-            </Stack>
+    <section className="card group-card">
+      <div className="card-body p-3">
+        <div className="d-flex align-items-center gap-2">
+          <Form.Select
+            size="sm"
+            className="stream-select"
+            aria-label="Active stream"
+            value={props.group.stream_id}
+            onChange={(event) => props.snapcontrol.setStream(props.group.id, event.target.value)}
+          >
+            {props.server.streams.map((stream) => (
+              <option key={stream.id} value={stream.id}>
+                {stream.id}
+              </option>
+            ))}
+          </Form.Select>
+          <div className="flex-grow-1" />
+          {stream?.properties.canControl && (
+            <div className="d-flex align-items-center gap-1">
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                aria-label="previous"
+                onClick={() => props.snapcontrol.control(stream.id, 'previous')}
+              >
+                <SkipBack size={18} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-icon"
+                aria-label="play/pause"
+                onClick={() => handlePlayPauseClicked(stream)}
+              >
+                {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                aria-label="next"
+                onClick={() => props.snapcontrol.control(stream.id, 'next')}
+              >
+                <SkipForward size={18} />
+              </button>
+            </div>
           )}
-          {clients.length > 1 && (
-            <Stack spacing={2} direction="row" sx={{ alignItems: 'center' }}>
-              <IconButton aria-label={'Mute ' + groupName} aria-pressed={props.group.muted} onClick={handleMuteClicked}>
-                {props.group.muted ? <VolumeOffIcon /> : <VolumeUpIcon />}
-              </IconButton>
-              <Slider
-                aria-label={groupName + ' volume'}
-                color="secondary"
-                min={0}
-                max={100}
-                size="small"
-                value={getVolume()}
-                onChange={(_, value) => handleVolumeChange(value as number)}
-                onChangeCommitted={() => {
-                  volumeDrag.current = null;
-                }}
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon"
+            aria-label={'Settings for ' + groupName}
+            onClick={handleSettingsClicked}
+          >
+            <Settings2 size={20} />
+          </button>
+        </div>
+
+        {metadata && (
+          <div className="now-playing d-flex flex-column flex-sm-row align-items-center gap-3 p-2 mt-3">
+            {metadata.artUrl && metadata.artUrl !== brokenArtUrl && (
+              <img
+                className="cover-art"
+                src={metadata.artUrl}
+                alt={title + ' cover'}
+                // Unreachable cover art, e.g. a URL only the server can resolve
+                onError={() => setBrokenArtUrl(metadata.artUrl!)}
               />
-            </Stack>
-          )}
-          {clients.length === 1 && <Box sx={{ py: 0.5 }} />}
-        </Stack>
-        <Divider />
-        <Box sx={{ py: 0.5 }} />
+            )}
+            <div className="flex-grow-1 overflow-hidden align-self-stretch align-self-sm-auto">
+              <div className="fw-semibold text-truncate">{title}</div>
+              <div className="text-body-secondary text-truncate">{artist}</div>
+              {(hasDuration || metadata.url) && (
+                <dl className="track-meta small text-body-secondary mb-0 mt-1">
+                  {hasDuration && (
+                    <>
+                      <dt>
+                        <Clock size={14} role="img" aria-label="Duration" />
+                      </dt>
+                      <dd>{formatDuration(metadata.duration!)}</dd>
+                    </>
+                  )}
+                  {metadata.url && (
+                    <>
+                      <dt>
+                        <FolderOpen size={14} role="img" aria-label="Path" />
+                      </dt>
+                      <dd>{metadata.url}</dd>
+                    </>
+                  )}
+                </dl>
+              )}
+            </div>
+          </div>
+        )}
+
+        {clients.length > 1 && (
+          <div className="mt-3">
+            <div
+              className="small text-body-secondary text-uppercase fw-semibold ps-1"
+              style={{ letterSpacing: '.04em' }}
+            >
+              Group volume
+            </div>
+            <VolumeControl
+              label={groupName}
+              volume={getVolume()}
+              muted={props.group.muted}
+              onMuteClick={handleMuteClicked}
+              onChange={handleVolumeChange}
+              onChangeEnd={() => {
+                volumeDrag.current = null;
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      <ul className="list-group list-group-flush border-top">
         {clients.map((client) => (
           <Client
             key={client.id}
@@ -338,51 +320,57 @@ export default function Group(props: GroupProps) {
             onVolumeChange={refresh}
           />
         ))}
-      </Card>
+      </ul>
 
-      <Dialog fullWidth open={settingsOpen} onClose={() => handleSettingsClose(false)}>
-        <DialogTitle>Group settings</DialogTitle>
-        <DialogContent>
-          <Divider textAlign="left">Stream</Divider>
-          <TextField
-            margin="dense"
-            select
-            fullWidth
-            variant="standard"
-            value={settingsStreamId}
-            slotProps={{ htmlInput: { 'aria-label': 'Stream' } }}
-            onChange={(event) => setSettingsStreamId(event.target.value)}
-          >
-            {props.server.streams.map((stream) => (
-              <MenuItem key={stream.id} value={stream.id}>
-                {stream.id}
-              </MenuItem>
-            ))}
-          </TextField>
-          <Divider textAlign="left">Clients</Divider>
-          <FormGroup>
-            {settingsClients.map((element) => (
-              <FormControlLabel
-                control={
-                  <Checkbox
+      <Modal
+        show={settingsOpen}
+        onHide={() => handleSettingsClose(false)}
+        centered
+        aria-labelledby={idPrefix + '-title'}
+      >
+        <Modal.Header closeButton>
+          <Modal.Title id={idPrefix + '-title'} as="h5">
+            Group settings
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form.Group className="mb-4" controlId={idPrefix + '-stream'}>
+            <Form.Label className="fw-semibold">Stream</Form.Label>
+            <Form.Select value={settingsStreamId} onChange={(event) => setSettingsStreamId(event.target.value)}>
+              {props.server.streams.map((stream) => (
+                <option key={stream.id} value={stream.id}>
+                  {stream.id}
+                </option>
+              ))}
+            </Form.Select>
+          </Form.Group>
+          <fieldset>
+            <legend className="form-label fs-6 fw-semibold">Clients</legend>
+            <div className="list-group">
+              {settingsClients.map((element) => (
+                <label key={element.client.id} className="list-group-item d-flex align-items-center gap-2">
+                  <input
+                    className="form-check-input m-0"
+                    type="checkbox"
                     checked={element.inGroup}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      handleGroupClientChange(element.client, e.target.checked)
-                    }
+                    onChange={(event) => handleGroupClientChange(element.client, event.target.checked)}
                   />
-                }
-                label={element.client.getName()}
-                key={element.client.id}
-              />
-            ))}
-          </FormGroup>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => handleSettingsClose(false)}>Cancel</Button>
-          <Button onClick={() => handleSettingsClose(true)}>OK</Button>
-        </DialogActions>
-      </Dialog>
-      {deleteSnackbars}
-    </div>
+                  {element.client.getName()}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="outline-secondary" onClick={() => handleSettingsClose(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => handleSettingsClose(true)}>
+            OK
+          </Button>
+        </Modal.Footer>
+      </Modal>
+      {undoDeleteNotices}
+    </section>
   );
 }

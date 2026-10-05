@@ -82,22 +82,10 @@ describe('Group', () => {
 
   // Drag the group slider through the given values in one gesture
   function drag(...values: number[]) {
-    // Give the slider a 100px track so pointer positions map 1:1 to values
-    const root = groupSlider().closest('.MuiSlider-root') as HTMLElement;
-    root.getBoundingClientRect = () => ({
-      left: 0,
-      width: 100,
-      top: 0,
-      height: 10,
-      right: 100,
-      bottom: 10,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
-    fireEvent.pointerDown(root, { clientX: values[0], button: 0 });
-    for (const value of values.slice(1)) fireEvent.pointerMove(document, { clientX: value, buttons: 1 });
-    fireEvent.pointerUp(document, { clientX: values[values.length - 1] });
+    const slider = groupSlider();
+    fireEvent.pointerDown(slider);
+    for (const value of values) fireEvent.change(slider, { target: { value } });
+    fireEvent.pointerUp(slider);
   }
 
   it('keeps volumes finite when a drag starts at 100 and returns to it', () => {
@@ -120,22 +108,7 @@ describe('Group', () => {
 
   it('scales from the volumes at the start of a drag', () => {
     renderGroup('g1');
-    // Give the slider a 100px track so pointer positions map 1:1 to values
-    const root = groupSlider().closest('.MuiSlider-root') as HTMLElement;
-    root.getBoundingClientRect = () => ({
-      left: 0,
-      width: 100,
-      top: 0,
-      height: 10,
-      right: 100,
-      bottom: 10,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
-    fireEvent.pointerDown(root, { clientX: 30, button: 0 });
-    fireEvent.pointerMove(document, { clientX: 60, buttons: 1 });
-    fireEvent.pointerUp(document, { clientX: 60 });
+    drag(30, 60);
 
     // Returning to the start value restores the original client volumes
     expect(
@@ -159,7 +132,7 @@ describe('Group', () => {
 
     expect(requests(ws, 'Group.SetMute')).toEqual([expect.objectContaining({ params: { id: 'g1', mute: true } })]);
     expect(control.getGroup('g1').muted).toBe(true);
-    expect(within(groupMute()).getByTestId('VolumeOffIcon')).toBeInTheDocument();
+    expect(groupMute()).toHaveAttribute('aria-pressed', 'true');
 
     await userEvent.click(groupMute());
     expect(requests(ws, 'Group.SetMute').slice(-1)[0].params.mute).toBe(false);
@@ -175,10 +148,22 @@ describe('Group', () => {
     expect(screen.queryByRole('img', { name: 'Path' })).not.toBeInTheDocument();
   });
 
+  it('hides the cover when the stream has none', () => {
+    delete control.getStream('s1').properties.metadata!.artUrl;
+    renderGroup('g1');
+    expect(screen.getByText('Song')).toBeInTheDocument();
+    expect(screen.queryByAltText('Song cover')).not.toBeInTheDocument();
+  });
+
+  it('hides a cover that fails to load', () => {
+    renderGroup('g1');
+    fireEvent.error(screen.getByAltText('Song cover'));
+    expect(screen.queryByAltText('Song cover')).not.toBeInTheDocument();
+  });
+
   it('switches the stream from the selector', async () => {
     renderGroup('g1');
-    await userEvent.click(screen.getByRole('combobox', { name: 'Active stream' }));
-    await userEvent.click(screen.getByRole('option', { name: 's2' }));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Active stream' }), 's2');
 
     expect(requests(ws, 'Group.SetStream')).toEqual([
       expect.objectContaining({ params: { id: 'g1', stream_id: 's2' } }),
@@ -212,7 +197,7 @@ describe('Group', () => {
     it('play a paused stream', async () => {
       control.getStream('s1').properties.playbackStatus = 'paused';
       renderGroup('g1');
-      expect(screen.getByTestId('PlayArrowIcon')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'play/pause' }).querySelector('.lucide-play')).not.toBeNull();
       await userEvent.click(screen.getByRole('button', { name: 'play/pause' }));
 
       expect(requests(ws, 'Stream.Control')[0].params).toEqual({ id: 's1', command: 'play' });
@@ -260,8 +245,7 @@ describe('Group', () => {
     it('changes the stream on OK', async () => {
       renderGroup('g1');
       const dialog = await openSettings();
-      await userEvent.click(within(dialog).getByRole('combobox'));
-      await userEvent.click(screen.getByRole('option', { name: 's2' }));
+      await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'Stream' }), 's2');
       await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
 
       expect(requests(ws, 'Group.SetStream')).toEqual([
@@ -282,8 +266,8 @@ describe('Group', () => {
   describe('deleting a client', () => {
     async function deleteOffline() {
       renderGroup('g2', true);
-      await userEvent.click(screen.getByRole('button', { name: 'host-c3 options' }));
-      await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Settings for host-c3' }));
+      await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
     }
 
     it('hides the client and offers undo', async () => {
@@ -295,8 +279,8 @@ describe('Group', () => {
 
     it('keeps the client hidden when a server update replaces it', async () => {
       const { rerender } = renderGroup('g2', true);
-      await userEvent.click(screen.getByRole('button', { name: 'host-c3 options' }));
-      await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Settings for host-c3' }));
+      await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
       control.server.fromJson(makeServerStatus());
       rerender(<Group server={control.server} group={control.getGroup('g2')} snapcontrol={control} showOffline />);
 
@@ -321,7 +305,7 @@ describe('Group', () => {
 
     it('deletes the client when the snackbar times out', async () => {
       await deleteOffline();
-      // Snackbar autoHideDuration is 6 seconds
+      // The undo notice is shown for 6 seconds
       await act(() => new Promise((resolve) => setTimeout(resolve, 6100)));
 
       expect(requests(ws, 'Server.DeleteClient')).toEqual([expect.objectContaining({ params: { id: 'c3' } })]);

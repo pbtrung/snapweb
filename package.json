@@ -19,13 +19,12 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.1",
-    "@mui/icons-material": "^9.4.0",
-    "@mui/material": "^9.4.0",
+    "bootstrap": "^5.3.8",
     "libflacjs": "^5.6.0",
+    "lucide-react": "^1.52.0",
     "opus-decoder": "^0.7.12",
     "react": "^19.3.0",
+    "react-bootstrap": "^2.10.10",
     "react-dom": "^19.3.0",
     "standardized-audio-context": "^25.3.77"
   },

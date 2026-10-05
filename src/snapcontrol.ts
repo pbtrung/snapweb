@@ -576,4 +576,3 @@ class SnapControl {
 
 export { SnapControl };
 export { Snapcast };
-export type { ClientJson, GroupJson, ServerJson, StreamJson };

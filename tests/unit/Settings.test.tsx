@@ -17,7 +17,7 @@ describe('SettingsDialog', () => {
   it('shows the current settings', () => {
     render(<SettingsDialog open onClose={vi.fn()} />);
     expect(screen.getByLabelText('Snapserver host')).toHaveValue('ws://old:1780');
-    expect(screen.getByRole('combobox')).toHaveTextContent('light');
+    expect(screen.getByRole('radio', { name: 'Light' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Show offline clients' })).not.toBeChecked();
   });
 
@@ -27,8 +27,7 @@ describe('SettingsDialog', () => {
     const host = screen.getByLabelText('Snapserver host');
     await userEvent.clear(host);
     await userEvent.type(host, 'ws://new:1780');
-    await userEvent.click(screen.getByRole('combobox'));
-    await userEvent.click(screen.getByRole('option', { name: 'dark' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Dark' }));
     await userEvent.click(screen.getByRole('checkbox', { name: 'Show offline clients' }));
     await userEvent.click(screen.getByRole('button', { name: 'OK' }));
 

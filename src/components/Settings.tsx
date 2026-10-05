@@ -1,21 +1,13 @@
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  TextField,
-  DialogTitle,
-  MenuItem,
-  Select,
-  SelectChangeEvent,
-  InputLabel,
-  FormControl,
-  FormControlLabel,
-  Checkbox,
-  Box,
-} from '@mui/material';
 import { useState } from 'react';
+import { Button, Form, Modal, ToggleButton, ToggleButtonGroup } from 'react-bootstrap';
+import { Monitor, Moon, Sun } from 'lucide-react';
 import { config, Theme } from '../config';
+
+const themes = [
+  { value: Theme.System, label: 'System', icon: Monitor },
+  { value: Theme.Light, label: 'Light', icon: Sun },
+  { value: Theme.Dark, label: 'Dark', icon: Moon },
+];
 
 export default function SettingsDialog(props: { open: boolean; onClose: (_apply: boolean) => void }) {
   const [serverurl, setServerurl] = useState(config.baseUrl);
@@ -32,66 +24,71 @@ export default function SettingsDialog(props: { open: boolean; onClose: (_apply:
   }
 
   return (
-    <div>
-      <Dialog open={props.open} onClose={() => handleClose(false)}>
-        <DialogTitle>Settings</DialogTitle>
-        <DialogContent dividers>
-          <TextField
+    <Modal show={props.open} onHide={() => handleClose(false)} centered aria-labelledby="settings-title">
+      <Modal.Header closeButton>
+        <Modal.Title id="settings-title" as="h5">
+          Settings
+        </Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Form.Group className="mb-4" controlId="settings-host">
+          <Form.Label className="fw-semibold">Snapserver host</Form.Label>
+          <Form.Control
             autoFocus
-            margin="dense"
-            id="host"
-            label="Snapserver host"
             type="text"
-            fullWidth
-            variant="standard"
-            onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-              setServerurl(event.target.value as string);
-            }}
+            spellCheck={false}
+            placeholder="ws://host:1780"
             value={serverurl}
+            onChange={(event) => setServerurl(event.target.value)}
           />
-          <Box sx={{ py: 1 }} />
-          <FormControl variant="standard" fullWidth sx={{ minWidth: 100 }}>
-            <InputLabel id="theme-label">Theme</InputLabel>
-            <Select
-              labelId="theme-label"
-              id="theme-select"
-              value={theme}
-              label="Theme"
-              onChange={(event: SelectChangeEvent<Theme>) => setTheme(event.target.value as Theme)}
-            >
-              <MenuItem value={Theme.System}>{Theme.System}</MenuItem>
-              <MenuItem value={Theme.Light}>{Theme.Light}</MenuItem>
-              <MenuItem value={Theme.Dark}>{Theme.Dark}</MenuItem>
-            </Select>
-          </FormControl>
-          <Box sx={{ py: 1 }} />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={showOffline}
-                onChange={(_event: React.ChangeEvent<HTMLInputElement>, checked: boolean) => setShowOffline(checked)}
-              />
-            }
-            label="Show offline clients"
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => {
-              handleClose(false);
-            }}
+        </Form.Group>
+        <Form.Group className="mb-4">
+          <Form.Label as="div" id="settings-theme" className="fw-semibold">
+            Theme
+          </Form.Label>
+          <ToggleButtonGroup
+            type="radio"
+            name="theme"
+            className="w-100"
+            aria-labelledby="settings-theme"
+            value={theme}
+            onChange={(value: Theme) => setTheme(value)}
           >
+            {themes.map(({ value, label, icon: Icon }) => (
+              <ToggleButton
+                key={value}
+                id={'settings-theme-' + value}
+                value={value}
+                variant="outline-primary"
+                className="d-inline-flex align-items-center justify-content-center gap-2"
+              >
+                <Icon size={16} aria-hidden="true" />
+                {label}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Form.Group>
+        <Form.Check
+          type="switch"
+          id="settings-show-offline"
+          label="Show offline clients"
+          checked={showOffline}
+          onChange={(event) => setShowOffline(event.target.checked)}
+        />
+      </Modal.Body>
+      <Modal.Footer className="justify-content-between">
+        <small className="text-body-secondary">
+          {import.meta.env.VITE_APP_NAME} {import.meta.env.VITE_APP_VERSION}
+        </small>
+        <div className="d-flex gap-2">
+          <Button variant="outline-secondary" onClick={() => handleClose(false)}>
             Cancel
           </Button>
-          <Button
-            onClick={() => {
-              handleClose(true);
-            }}
-          >
+          <Button variant="primary" onClick={() => handleClose(true)}>
             OK
           </Button>
-        </DialogActions>
-      </Dialog>
-    </div>
+        </div>
+      </Modal.Footer>
+    </Modal>
   );
 }

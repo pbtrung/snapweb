@@ -28,8 +28,8 @@ export default defineConfig({
               test: /node_modules[\\/](standardized-audio-context|automation-events|opus-decoder|@wasm-audio-decoders|@eshaz)[\\/]/,
             },
             {
-              name: 'mui',
-              test: /node_modules[\\/](@mui|@emotion|@babel[\\/]runtime|stylis|react-is|react-transition-group|prop-types|clsx)[\\/]/,
+              name: 'ui',
+              test: /node_modules[\\/](react-bootstrap|@restart|@popperjs|@babel[\\/]runtime|@swc[\\/]helpers|dom-helpers|react-transition-group|uncontrollable|prop-types|prop-types-extra|react-is|classnames|warning|invariant|lucide-react)[\\/]/,
             },
           ],
         },
@@ -44,7 +44,7 @@ export default defineConfig({
       manifest: {
         name: 'Snapweb - Snapcast web client',
         short_name: 'Snapweb',
-        theme_color: '#607d8b',
+        theme_color: '#4f46e5',
         icons: [
           {
             src: 'pwa-64x64.png',

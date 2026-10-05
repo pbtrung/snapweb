@@ -114,17 +114,14 @@ describe('SnapWeb', () => {
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
   });
 
-  async function openFromMenu(item: string) {
-    // Wait for an earlier drawer or dialog to finish closing
-    const menu = await screen.findAllByRole('button', { name: 'menu' });
-    await userEvent.click(menu[0]);
-    await userEvent.click(screen.getByRole('button', { name: item }));
+  async function openSettings() {
+    await userEvent.click(screen.getByRole('button', { name: 'Open settings' }));
   }
 
   it('reconnects when the server url changes in the settings', async () => {
     render(<SnapWeb />);
     const old = connect();
-    await openFromMenu('Settings...');
+    await openSettings();
     const host = screen.getByLabelText('Snapserver host');
     await userEvent.clear(host);
     await userEvent.type(host, 'ws://other:1780');
@@ -138,7 +135,7 @@ describe('SnapWeb', () => {
   it('keeps the connection when the settings keep the url', async () => {
     render(<SnapWeb />);
     connect();
-    await openFromMenu('Settings...');
+    await openSettings();
     await userEvent.click(screen.getByRole('checkbox', { name: 'Show offline clients' }));
     await userEvent.click(screen.getByRole('button', { name: 'OK' }));
 
@@ -149,31 +146,21 @@ describe('SnapWeb', () => {
 
   it('drops cancelled settings edits the next time the dialog opens', async () => {
     render(<SnapWeb />);
-    await openFromMenu('Settings...');
+    await openSettings();
     await userEvent.type(screen.getByLabelText('Snapserver host'), '/typo');
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    await openFromMenu('Settings...');
+    await openSettings();
 
     expect(screen.getByLabelText('Snapserver host')).toHaveValue('ws://snapserver:1780');
-  });
-
-  it('opens the about dialog from the menu', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    render(<SnapWeb />);
-    await openFromMenu('About...');
-    expect(screen.getByRole('dialog', { name: 'About Snapweb' })).toBeInTheDocument();
   });
 
   it('starts and stops local playback', async () => {
     render(<SnapWeb />);
     connect();
-    expect(screen.getByTestId('PlayArrowIcon', { exact: true })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByTestId('PlayArrowIcon').closest('button')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
     await waitFor(() => expect(snapStream.created).toEqual(['ws://snapserver:1780']));
-    expect(screen.getByTestId('StopIcon')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId('StopIcon').closest('button')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Stop playing' }));
     expect(snapStream.stop).toHaveBeenCalledTimes(1);
   });
 
@@ -232,7 +219,7 @@ describe('SnapWeb', () => {
         ws.open();
         ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', result: { server: statusWithThisBrowser() } });
       });
-      await userEvent.click(screen.getByTestId('PlayArrowIcon').closest('button')!);
+      await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
       await waitFor(() => expect(snapStream.created).toHaveLength(1));
       // The media session is refreshed on the next server update
       act(() => ws.receive({ jsonrpc: '2.0', method: 'Group.OnMute', params: { id: 'g1', mute: false } }));
@@ -273,7 +260,7 @@ describe('SnapWeb', () => {
         ws.open();
         ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', result: { server: status } });
       });
-      await userEvent.click(screen.getByTestId('PlayArrowIcon').closest('button')!);
+      await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
       await waitFor(() => expect(snapStream.created).toHaveLength(1));
       act(() => ws.receive({ jsonrpc: '2.0', method: 'Group.OnMute', params: { id: 'g1', mute: false } }));
       ws.sent = [];
@@ -335,7 +322,7 @@ describe('SnapWeb', () => {
     connect();
     await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
     await waitFor(() => expect(snapStream.created).toHaveLength(1));
-    await openFromMenu('Settings...');
+    await openSettings();
     const host = screen.getByLabelText('Snapserver host');
     await userEvent.clear(host);
     await userEvent.type(host, 'ws://other:1780');
@@ -364,8 +351,8 @@ describe('SnapWeb', () => {
     );
     render(<SnapWeb />);
     connect();
-    await userEvent.click(screen.getByTestId('PlayArrowIcon').closest('button')!);
-    await userEvent.click(screen.getByTestId('StopIcon').closest('button')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Stop playing' }));
     await act(async () => {
       resolvePlay();
     });
@@ -375,7 +362,6 @@ describe('SnapWeb', () => {
 
   it('does not add color scheme listeners on re-render and removes them on unmount', () => {
     const { unmount } = render(<SnapWeb />);
-    // SnapWeb's own listener plus the one from MUI's useMediaQuery
     const initial = listeners.size;
     const ws = connect();
     for (let i = 0; i < 5; ++i)
