@@ -9,6 +9,12 @@
   performance clock, map audio time to it with getOutputTimestamp(), and
   resync at once on a clock jump instead of playing out of sync for tens of
   seconds and then dropping about a second of audio
+- Fix the output latency being counted twice, which made Snapweb play ahead
+  of other clients
+- Fix startup sync: ignore time replies from before a reconnect, sync with a
+  burst of requests and play silence until synced instead of dropping chunks
+- Fix time sync median, which sorted clock offsets as strings (PR #165)
+- Fix swapped sent/received timestamps when reading message headers
 - Restart playback when it falls behind after the main thread stalls,
   instead of playing out of sync from then on
 - Fix the audio stream lifecycle: stop() cancels a pending reconnect, codec
@@ -19,19 +25,29 @@
 - Fix Opus streams below 48 kHz playing at the wrong speed, 32 bit Opus
   overflowing and the first Opus frames being dropped; recover the FLAC
   decoder after a failed decode
+- Fix audio playing about 6 dB too quiet, fix non-ASCII names being
+  truncated in stream messages, fix a color scheme listener leaking on every
+  render, fix NaN group volume for empty groups (PR #166)
 - Fix sockets replaced while connecting staying open and reporting a false
   "connected", and requests throwing while reconnecting
 - Keep the control connection alive through proxies and tunnels that close
   idle WebSockets, and keep playback running when it reconnects
+- Ignore messages from the previous server after switching servers, and don't
+  drop a batch of notifications because one refers to an unknown client
 - Normalize the server url ("host:1780", "http://...", trailing slashes) and
   survive blocked or full browser storage
 - Fix NaN group volumes when dragging from 0 or 100, deleted clients
   reappearing during undo, a rejected play() leaving the player stuck, and
   the settings dialog keeping cancelled edits
+- Fix React hooks issues: state and props mutated during render, callbacks
+  reassigned on every render, setState in effects
+- Don't start playback when stopped before the audio code finished loading
 - Fix the PWA icons and theme colour in the manifest
 
 ### Features
 
+- Load the audio stream and decoders on first playback, and split the
+  bundle into cacheable vendor chunks (initial load 1.1 MB -> about 560 kB)
 - Show the stream duration and file path in the group card
 - Name controls after their group or client for screen readers
 - Log the codec, sample format, metadata, connection state and audio clock
@@ -40,48 +56,13 @@
 
 ### General
 
-- Move index.html into src/
-- Type-check the Vite and Vitest configs in the build
-- Declare the required Node.js version (22.22.2+, 24.15+ or 26+)
-
-### Contributors
-
-- @pbtrung
-
-_Trung Pham <pbtrung@outlook.com>  Mon, 05 Oct 2026 09:00:04 -0700_
-
-## Version 0.9999
-
-### Bugfixes
-
-- Fix time sync median, which sorted clock offsets as strings (PR #165)
-- Fix audio playing about 6 dB too quiet, fix non-ASCII names being
-  truncated in stream messages, fix a color scheme listener leaking on every
-  render, fix NaN group volume for empty groups (PR #166)
-- Fix audio sync: measure the server time on the clock buffers are scheduled
-  on, so the output latency is no longer counted twice, which made Snapweb
-  play ahead of other clients
-- Fix startup sync: ignore time replies measured on the previous clock, sync
-  with a burst of requests and play silence until synced instead of dropping
-  chunks
-- Fix swapped sent/received timestamps when reading message headers
-- Ignore messages from the previous server after switching servers, and don't
-  drop a batch of notifications because one refers to an unknown client
-- Fix React hooks issues: state and props mutated during render, callbacks
-  reassigned on every render, setState in effects
-- Don't start playback when stopped before the audio code finished loading
-
-### Features
-
-- Load the audio stream and decoders on first playback, and split the
-  bundle into cacheable vendor chunks (initial load 1.1 MB -> about 560 kB)
-
-### General
-
 - Update packages: MUI 9, Vite 8, ESLint 10, TypeScript 6
 - Switch to @vitejs/plugin-react, replace the deprecated glob 11
 - Add unit, component and Snapserver integration tests (Vitest)
 - Add Prettier and format the codebase
+- Move index.html into src/
+- Type-check the Vite and Vitest configs in the build
+- Declare the required Node.js version (22.22.2+, 24.15+ or 26+)
 - Remove CI workflow, dependabot, Debian packaging and devcontainer setup
 - Remove README screenshots and the Contributing section
 
@@ -90,7 +71,7 @@ _Trung Pham <pbtrung@outlook.com>  Mon, 05 Oct 2026 09:00:04 -0700_
 - @pbtrung
 - @xn101de
 
-_Trung Pham <pbtrung@outlook.com>  Wed, 30 Sep 2026 13:58:45 -0700_
+_Trung Pham <pbtrung@outlook.com>  Mon, 05 Oct 2026 09:00:04 -0700_
 
 ## Version 0.9.3
 
