@@ -1,5 +1,55 @@
 # Snapweb changelog
 
+## Version 0.999
+
+### Bugfixes
+
+- Fix audio cutting out after the audio clock stalls (context suspended,
+  output device stall or change): sync the server time against the
+  performance clock, map audio time to it with getOutputTimestamp(), and
+  resync at once on a clock jump instead of playing out of sync for tens of
+  seconds and then dropping about a second of audio
+- Restart playback when it falls behind after the main thread stalls,
+  instead of playing out of sync from then on
+- Fix the audio stream lifecycle: stop() cancels a pending reconnect, codec
+  headers no longer start overlapping playback chains, and AudioContexts and
+  decoders are released instead of leaking
+- Fix a hard sync that padded over half a buffer silencing the whole buffer,
+  and follow output latency changes (e.g. switching to Bluetooth)
+- Fix Opus streams below 48 kHz playing at the wrong speed, 32 bit Opus
+  overflowing and the first Opus frames being dropped; recover the FLAC
+  decoder after a failed decode
+- Fix sockets replaced while connecting staying open and reporting a false
+  "connected", and requests throwing while reconnecting
+- Keep the control connection alive through proxies and tunnels that close
+  idle WebSockets, and keep playback running when it reconnects
+- Normalize the server url ("host:1780", "http://...", trailing slashes) and
+  survive blocked or full browser storage
+- Fix NaN group volumes when dragging from 0 or 100, deleted clients
+  reappearing during undo, a rejected play() leaving the player stuck, and
+  the settings dialog keeping cancelled edits
+- Fix the PWA icons and theme colour in the manifest
+
+### Features
+
+- Show the stream duration and file path in the group card
+- Name controls after their group or client for screen readers
+- Log the codec, sample format, metadata, connection state and audio clock
+  jumps to the console, and log dropped chunks once per sync instead of once
+  per chunk
+
+### General
+
+- Move index.html into src/
+- Type-check the Vite and Vitest configs in the build
+- Declare the required Node.js version (22.22.2+, 24.15+ or 26+)
+
+### Contributors
+
+- @pbtrung
+
+_Trung Pham <pbtrung@outlook.com>  Mon, 05 Oct 2026 09:00:04 -0700_
+
 ## Version 0.9999
 
 ### Bugfixes
