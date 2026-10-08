@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Form, ToggleButton, ToggleButtonGroup } from 'react-bootstrap';
-import { Monitor, Moon, Settings, Sun } from 'lucide-react';
+import { Button, Form, ToggleButton, ToggleButtonGroup } from 'react-bootstrap';
+import { LogOut, Monitor, Moon, Settings, Sun } from 'lucide-react';
 import Dialog, { DialogSection } from './Dialog';
 import { config, Theme } from '../config';
 
@@ -10,7 +10,15 @@ const themes = [
   { value: Theme.Dark, label: 'Dark', icon: Moon },
 ];
 
-export default function SettingsDialog(props: { open: boolean; onClose: (_apply: boolean) => void }) {
+type SettingsDialogProps = {
+  open: boolean;
+  onClose: (_apply: boolean) => void;
+  // Whether a control API login is held, which onLogout forgets
+  loggedIn?: boolean;
+  onLogout?: () => void;
+};
+
+export default function SettingsDialog(props: SettingsDialogProps) {
   const [serverurl, setServerurl] = useState(config.baseUrl);
   const [theme, setTheme] = useState(config.theme);
   const [showOffline, setShowOffline] = useState(config.showOffline);
@@ -49,6 +57,20 @@ export default function SettingsDialog(props: { open: boolean; onClose: (_apply:
             onChange={(event) => setServerurl(event.target.value)}
           />
         </Form.Group>
+        {props.loggedIn && (
+          <div className="d-flex align-items-center justify-content-between gap-3 mt-3">
+            <span className="small text-body-secondary">Logged in to the control API</span>
+            <Button
+              variant="outline-danger"
+              size="sm"
+              className="d-inline-flex align-items-center gap-2"
+              onClick={props.onLogout}
+            >
+              <LogOut size={16} aria-hidden="true" />
+              Log out
+            </Button>
+          </div>
+        )}
       </DialogSection>
       <DialogSection title="Appearance">
         <Form.Group className="mb-3">

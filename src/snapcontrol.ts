@@ -1,3 +1,5 @@
+import { authToken } from './config';
+
 // JSON shapes of the Snapcast control API (Server.GetStatus and notifications)
 interface HostJson {
   arch: string;
@@ -75,6 +77,41 @@ interface ServerJson {
 interface Notification {
   method: string;
   params: any;
+}
+
+interface RpcError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+interface Credentials {
+  scheme: 'Basic' | 'Bearer';
+  param: string;
+}
+
+// An error reply to a request made with SnapControl.call
+class RequestError extends Error {
+  readonly error: RpcError;
+
+  constructor(error: RpcError) {
+    super(error.message);
+    this.error = error;
+  }
+}
+
+// Snapserver answers 401 until the connection is authenticated; older
+// servers used -32000 with an "Unauthorized" message
+function needsLogin(error: RpcError | undefined): boolean {
+  if (!error) return false;
+  return error.code === 401 || (error.code === -32000 && /nauthorized/.test(String(error.message)));
+}
+
+// btoa only takes Latin-1, so encode the text as UTF-8 first
+function base64(text: string): string {
+  let binary = '';
+  for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 namespace Snapcast {
@@ -339,10 +376,19 @@ const RECONNECT_DELAY_MS = 1000;
 // and tunnels (e.g. Cloudflare) close idle WebSockets after 20-30 s
 const KEEPALIVE_INTERVAL_MS = 10000;
 const KEEPALIVE_TIMEOUT_MS = 3 * KEEPALIVE_INTERVAL_MS;
+// After a failed request the status is refetched after this delay, doubled
+// for every further failure up to the maximum, so a server that keeps
+// failing isn't flooded with requests
+const STATUS_RETRY_MIN_MS = 1000;
+const STATUS_RETRY_MAX_MS = 30000;
+// Methods Snapserver answers before the connection is authenticated
+const UNAUTHENTICATED_METHODS = new Set(['Server.Authenticate', 'Server.GetToken', 'Server.GetRPCVersion']);
 
 class SnapControl {
   onChange: ((_this: SnapControl, _server: Snapcast.Server) => void) | null = null;
   onConnectionChanged: ((_this: SnapControl, _connected: boolean, _error?: string) => void) | null = null;
+  // Called when the server starts or stops asking for a login
+  onAuthRequired: ((_this: SnapControl, _required: boolean) => void) | null = null;
   connection?: WebSocket;
   server: Snapcast.Server = new Snapcast.Server();
   msg_id: number = 0;
@@ -350,16 +396,34 @@ class SnapControl {
   timer: ReturnType<typeof setTimeout> | null = null;
   keepalive: ReturnType<typeof setInterval> | null = null;
   lastMessage: number = 0;
+  // The login used on every (re)connect: a token from Server.GetToken, or
+  // the Basic param when the server can't issue tokens (kept in memory only)
+  token?: string;
+  basic?: string;
+  authRequired: boolean = false;
+  private baseUrl: string = '';
+  // Requests waiting for their response
+  private requests = new Map<
+    number,
+    { method: string; resolve?: (result: any) => void; reject?: (reason: Error) => void }
+  >();
+  // Requests held back while Server.Authenticate is answered, so they don't
+  // reach the server before it
+  private queue: { id: number; message: string }[] | null = null;
+  private refetchTimer: ReturnType<typeof setTimeout> | null = null;
+  private refetchDelay: number = STATUS_RETRY_MIN_MS;
 
   public connect(baseUrl: string) {
     this.disconnect();
+    this.baseUrl = baseUrl;
+    this.token ??= authToken.get();
     try {
       const connection = new WebSocket(baseUrl + '/jsonrpc');
       this.connection = connection;
       connection.onmessage = (msg: MessageEvent) => this.onMessage(msg.data);
       connection.onopen = () => {
         console.info('Control connected to ' + baseUrl);
-        this.status_req_id = this.sendRequest('Server.GetStatus');
+        void this.startSession(connection);
         this.lastMessage = Date.now();
         this.keepalive = setInterval(() => {
           // A half-open connection (NAT timeout, network change) stays OPEN
@@ -380,6 +444,7 @@ class SnapControl {
       };
       connection.onclose = (ev?: CloseEvent) => {
         this.stopKeepalive();
+        this.resetRequests();
         console.info(
           'Control disconnected (code ' +
             ev?.code +
@@ -401,6 +466,7 @@ class SnapControl {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.stopKeepalive();
+    this.resetRequests();
     const connection = this.connection;
     if (connection) {
       // Detach first, so nothing the old connection still delivers, including
@@ -414,6 +480,146 @@ class SnapControl {
       this.connection = undefined;
     }
     this.onConnectionChanged?.(this, false);
+  }
+
+  // Logs in with a user name and password. Throws an Error with a message for
+  // the user when the login is rejected or the server can't be reached.
+  public async login(username: string, password: string, remember: boolean) {
+    const basic = base64(username + ':' + password);
+    const failure = await this.authenticate({ scheme: 'Basic', param: basic }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    if (failure instanceof RequestError && needsLogin(failure.error)) throw new Error('Wrong user name or password');
+    if (failure instanceof RequestError) throw new Error('Login failed: ' + failure.message);
+    if (failure) throw new Error('Not connected to Snapserver');
+    this.requestStatus();
+    // Prefer a token, so the password needn't be kept. Snapserver versions
+    // without Server.GetToken answer "method not found".
+    let token: unknown;
+    try {
+      token = (await this.call('Server.GetToken', { username, password }))?.token;
+    } catch (e) {
+      console.info('No login token from the server (' + (e as Error).message + '), keeping the login in memory');
+    }
+    if (typeof token === 'string' && token !== '') {
+      this.token = token;
+      this.basic = undefined;
+      authToken.set(token, remember);
+    } else {
+      this.token = undefined;
+      this.basic = basic;
+      authToken.clear();
+    }
+  }
+
+  get loggedIn(): boolean {
+    return this.token !== undefined || this.basic !== undefined;
+  }
+
+  // Forgets the login, including a stored token, without reconnecting
+  public forgetLogin() {
+    this.token = undefined;
+    this.basic = undefined;
+    authToken.clear();
+    this.setAuthRequired(false);
+  }
+
+  // Forgets the login and reconnects, which ends the authenticated session
+  public logout() {
+    this.forgetLogin();
+    if (this.connection) this.connect(this.baseUrl);
+  }
+
+  // Authenticates a new connection with the login held, if any, and then
+  // requests the status. An expired token falls back to the Basic param, or
+  // asks for a new login.
+  private async startSession(connection: WebSocket) {
+    const attempts: Credentials[] = [];
+    if (this.token) attempts.push({ scheme: 'Bearer', param: this.token });
+    if (this.basic) attempts.push({ scheme: 'Basic', param: this.basic });
+    for (const credentials of attempts) {
+      try {
+        await this.authenticate(credentials);
+        break;
+      } catch (e) {
+        // Closed or replaced while authenticating
+        if (!(e instanceof RequestError) || connection !== this.connection) return;
+        if (!needsLogin(e.error)) {
+          // e.g. a server without authentication; the status request tells
+          console.warn('Server.Authenticate failed:', e.error);
+          break;
+        }
+        console.warn(credentials.scheme + ' login rejected');
+        if (credentials.scheme === 'Bearer') {
+          this.token = undefined;
+          authToken.clear();
+        } else {
+          this.basic = undefined;
+        }
+        if (!this.loggedIn) {
+          this.setAuthRequired(true);
+          return;
+        }
+      }
+    }
+    this.requestStatus();
+  }
+
+  // Sends Server.Authenticate ahead of everything requested meanwhile
+  private async authenticate(credentials: Credentials) {
+    const queue: { id: number; message: string }[] = [];
+    this.queue = queue;
+    try {
+      await this.call('Server.Authenticate', { scheme: credentials.scheme, param: credentials.param });
+    } catch (e) {
+      // They would only fail; the status is fetched again after the login
+      if (queue.length) console.warn('Dropping ' + queue.length + ' requests sent before the login');
+      for (const { id } of queue) this.requests.delete(id);
+      throw e;
+    } finally {
+      if (this.queue === queue) this.queue = null;
+    }
+    this.setAuthRequired(false);
+    for (const { message } of queue) this.connection?.send(message);
+  }
+
+  private setAuthRequired(required: boolean) {
+    if (this.authRequired === required) return;
+    this.authRequired = required;
+    if (required) this.cancelRefetch();
+    this.onAuthRequired?.(this, required);
+  }
+
+  private requestStatus() {
+    this.status_req_id = this.sendRequest('Server.GetStatus');
+  }
+
+  // Refetches the status after a failed request. Failures while a refetch is
+  // pending share it, and the delay grows until a status arrives.
+  private scheduleRefetch() {
+    if (this.refetchTimer) return;
+    console.info('Refetching the status in ' + this.refetchDelay + ' ms');
+    this.refetchTimer = setTimeout(() => {
+      this.refetchTimer = null;
+      this.requestStatus();
+    }, this.refetchDelay);
+    this.refetchDelay = Math.min(2 * this.refetchDelay, STATUS_RETRY_MAX_MS);
+  }
+
+  private cancelRefetch() {
+    if (this.refetchTimer) clearTimeout(this.refetchTimer);
+    this.refetchTimer = null;
+  }
+
+  // Fails the requests still waiting for a response, and forgets the rest
+  private resetRequests() {
+    this.cancelRefetch();
+    this.refetchDelay = STATUS_RETRY_MIN_MS;
+    this.queue = null;
+    const requests = [...this.requests.values()];
+    this.requests.clear();
+    for (const request of requests) request.reject?.(new Error('Connection closed'));
   }
 
   private stopKeepalive() {
@@ -561,10 +767,40 @@ class SnapControl {
       console.warn('Not connected, dropping ' + method);
       return id;
     }
-    this.connection.send(
-      JSON.stringify(params ? { id, jsonrpc: '2.0', method, params } : { id, jsonrpc: '2.0', method }),
-    );
+    const message = JSON.stringify(params ? { id, jsonrpc: '2.0', method, params } : { id, jsonrpc: '2.0', method });
+    this.requests.set(id, { method });
+    if (this.queue && !UNAUTHENTICATED_METHODS.has(method)) this.queue.push({ id, message });
+    else this.connection.send(message);
     return id;
+  }
+
+  // Sends a request and resolves with its result, or rejects with a
+  // RequestError for an error reply and an Error when not connected
+  private call(method: string, params?: Record<string, unknown>): Promise<any> {
+    return new Promise((resolve, reject) => {
+      if (this.connection?.readyState !== WebSocket.OPEN) {
+        reject(new Error('Not connected'));
+        return;
+      }
+      const id = this.sendRequest(method, params);
+      this.requests.set(id, { method, resolve, reject });
+    });
+  }
+
+  private onRequestError(id: number, method: string | undefined, error: RpcError) {
+    if (needsLogin(error)) {
+      // Refetching would only fail again until someone logs in
+      console.warn((method ?? 'Request ' + id) + ' needs a login');
+      this.setAuthRequired(true);
+      return;
+    }
+    console.warn('Request ' + id + ' (' + (method ?? 'unknown') + ') failed:', error);
+    // Stream.Control doesn't change the model, e.g. "Stream can not be
+    // controlled", so there is nothing to bring back in line
+    if (method === 'Stream.Control') return;
+    // Requests change the model before the server answers, so a failed one
+    // (or a failed status request) leaves it out of line: refetch it
+    this.scheduleRefetch();
   }
 
   private onMessage(msg: string) {
@@ -577,16 +813,22 @@ class SnapControl {
       return;
     }
     if (json_msg.id !== undefined) {
+      const request = this.requests.get(json_msg.id);
+      this.requests.delete(json_msg.id);
+      if (request?.resolve) {
+        if (json_msg.error) request.reject?.(new RequestError(json_msg.error));
+        else request.resolve(json_msg.result);
+        return;
+      }
       if (json_msg.error) {
-        // Requests change the model before the server answers, so a failed
-        // one (or a failed status request) leaves it out of line: refetch it
-        console.warn('Request ' + json_msg.id + ' failed:', json_msg.error);
-        this.status_req_id = this.sendRequest('Server.GetStatus');
+        this.onRequestError(json_msg.id, request?.method, json_msg.error);
         return;
       }
       // Responses only matter when they carry the server status
       if (json_msg.id !== this.status_req_id) return;
       this.server = new Snapcast.Server(json_msg.result.server);
+      this.refetchDelay = STATUS_RETRY_MIN_MS;
+      this.setAuthRequired(false);
       for (const stream of this.server.streams)
         console.info('Stream ' + stream.id + ' metadata:', stream.properties.metadata);
     } else {
@@ -603,5 +845,5 @@ class SnapControl {
   }
 }
 
-export { SnapControl };
+export { SnapControl, base64, needsLogin };
 export { Snapcast };

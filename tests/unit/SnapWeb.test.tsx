@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SnapWeb from '../../src/components/SnapWeb';
-import { config } from '../../src/config';
+import { authToken, config } from '../../src/config';
 import { FakeWebSocket } from '../helpers/fakeWebSocket';
 import { makeServerStatus } from '../fixtures/serverStatus';
-import { quietConsole } from '../helpers/snapControl';
+import { quietConsole, requests } from '../helpers/snapControl';
 
 // The audio stream needs Web Audio, which jsdom lacks
 const snapStream = vi.hoisted(() => ({
@@ -29,6 +29,7 @@ describe('SnapWeb', () => {
   beforeEach(() => {
     quietConsole();
     window.localStorage.clear();
+    window.sessionStorage.clear();
     config.baseUrl = 'ws://snapserver:1780';
     FakeWebSocket.reset();
     vi.stubGlobal('WebSocket', FakeWebSocket);
@@ -238,6 +239,115 @@ describe('SnapWeb', () => {
   async function openSettings() {
     await userEvent.click(screen.getByRole('button', { name: 'Open settings' }));
   }
+
+  describe('login', () => {
+    const unauthorized = { code: 401, message: 'Unauthorized' };
+
+    function needingLogin() {
+      const ws = socket();
+      act(() => {
+        ws.open();
+        ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', error: unauthorized });
+      });
+      return ws;
+    }
+
+    function reply(ws: FakeWebSocket, request: { id: number }, result: unknown) {
+      act(() => ws.receive({ id: request.id, jsonrpc: '2.0', result }));
+    }
+
+    async function logIn(ws: FakeWebSocket, remember = false) {
+      const dialog = screen.getByRole('dialog', { name: 'Log in' });
+      await userEvent.type(within(dialog).getByLabelText('User name'), 'admin');
+      await userEvent.type(within(dialog).getByLabelText('Password'), 'secret');
+      if (remember) await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Remember me' }));
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Log in' }));
+      reply(ws, requests(ws, 'Server.Authenticate')[0], 'ok');
+      await waitFor(() => expect(requests(ws, 'Server.GetToken')).toHaveLength(1));
+      reply(ws, requests(ws, 'Server.GetStatus')[1], { server: makeServerStatus() });
+      reply(ws, requests(ws, 'Server.GetToken')[0], { token: 'jwt' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    }
+
+    it('asks for a login when the server needs one, and loads the groups after it', async () => {
+      render(<SnapWeb />);
+      const ws = needingLogin();
+      await logIn(ws, true);
+
+      expect(requests(ws, 'Server.Authenticate')[0].params).toEqual({ scheme: 'Basic', param: 'YWRtaW46c2VjcmV0' });
+      expect(screen.getByText('Kitchen')).toBeInTheDocument();
+      expect(authToken.get()).toBe('jwt');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('says when the user name or password is wrong', async () => {
+      render(<SnapWeb />);
+      const ws = needingLogin();
+      const dialog = screen.getByRole('dialog', { name: 'Log in' });
+      await userEvent.type(within(dialog).getByLabelText('Password'), 'wrong{Enter}');
+      act(() => ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', error: unauthorized }));
+
+      expect(await within(dialog).findByText('Wrong user name or password')).toBeInTheDocument();
+    });
+
+    it('offers the login again after it was cancelled', async () => {
+      render(<SnapWeb />);
+      needingLogin();
+      await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent('Login required');
+      await userEvent.click(within(alert).getByRole('button', { name: 'Log in' }));
+      expect(screen.getByRole('dialog', { name: 'Log in' })).toBeInTheDocument();
+    });
+
+    it('logs in with the stored token without asking', () => {
+      authToken.set('jwt', true);
+      render(<SnapWeb />);
+      const ws = socket();
+      act(() => ws.open());
+      expect(ws.lastSent()).toMatchObject({
+        method: 'Server.Authenticate',
+        params: { scheme: 'Bearer', param: 'jwt' },
+      });
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('logs out from the settings', async () => {
+      render(<SnapWeb />);
+      const ws = needingLogin();
+      await logIn(ws, true);
+      await openSettings();
+      await userEvent.click(screen.getByRole('button', { name: 'Log out' }));
+
+      expect(authToken.get()).toBeUndefined();
+      expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+      const next = socket();
+      expect(next).not.toBe(ws);
+      act(() => {
+        next.open();
+        next.receive({ id: next.lastSent().id, jsonrpc: '2.0', error: unauthorized });
+      });
+      expect(screen.getByRole('dialog', { name: 'Log in' })).toBeInTheDocument();
+    });
+
+    it('forgets the login when the server url changes', async () => {
+      render(<SnapWeb />);
+      await logIn(needingLogin(), true);
+      await openSettings();
+      const host = screen.getByLabelText('Snapserver host');
+      await userEvent.clear(host);
+      await userEvent.type(host, 'ws://other:1780');
+      await userEvent.click(screen.getByRole('button', { name: 'OK' }));
+
+      expect(authToken.get()).toBeUndefined();
+      const other = socket('ws://other:1780/jsonrpc');
+      act(() => other.open());
+      expect(other.sent).toEqual([expect.objectContaining({ method: 'Server.GetStatus' })]);
+    });
+  });
 
   it('reconnects when the server url changes in the settings', async () => {
     render(<SnapWeb />);

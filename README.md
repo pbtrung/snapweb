@@ -67,6 +67,25 @@ It needs `curl` or `wget`, and `unzip`. Point the `[http] doc_root` in your
 The app name and version come from `package.json`; bump `version` there
 before tagging a release.
 
+## Login
+
+When Snapserver requires authentication for its control API, Snapweb asks for
+a user name and password and logs in with them (`Server.Authenticate`). The
+audio stream needs no login, so playback works either way.
+
+- Snapweb then asks the server for a login token (`Server.GetToken`) and keeps
+  only the token, never the password. The token is valid for 24 hours; once it
+  expires Snapweb asks for the login again.
+- With **Remember me** the token is stored in the browser and survives
+  restarts. Without it, it is kept for the browser tab only.
+- Servers without `Server.GetToken` get the login again on every reconnect
+  from memory, so it lasts until the page is closed or reloaded.
+- **Log out** in Settings forgets the login, including a stored token.
+  Changing the Snapserver host forgets it too.
+
+If the login dialog was cancelled, the "Login required" notice opens it
+again.
+
 ## Setup as WebApp
 
 On Android open `http://<snapserver host>:1780` in Chrome and select in the menu

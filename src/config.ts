@@ -3,6 +3,7 @@ const keys = {
   theme: 'theme',
   showoffline: 'showoffline',
   clientId: 'uniqueId',
+  authToken: 'auth.token',
 };
 
 enum Theme {
@@ -13,9 +14,9 @@ enum Theme {
 
 // Storage may be missing, or throw when site data is blocked or full; the
 // app then keeps working with defaults for this page load
-function storage(): Storage | undefined {
+function storage(name: 'localStorage' | 'sessionStorage' = 'localStorage'): Storage | undefined {
   try {
-    return window.localStorage ?? undefined;
+    return window[name] ?? undefined;
   } catch {
     return undefined;
   }
@@ -118,4 +119,38 @@ const config = {
   },
 };
 
-export { config, getClientId, getPersistentValue, normalizeBaseUrl, setPersistentValue, Theme, uuidv4 };
+// The control API login token. With "Remember me" it is kept in
+// localStorage, otherwise in sessionStorage, which goes with the tab.
+// Passwords are never stored.
+const authToken = {
+  get(): string | undefined {
+    for (const name of ['localStorage', 'sessionStorage'] as const) {
+      try {
+        const token = storage(name)?.getItem(keys.authToken);
+        if (token) return token;
+      } catch (e) {
+        console.warn('Failed to read the login token: ' + e);
+      }
+    }
+    return undefined;
+  },
+  set(token: string, remember: boolean) {
+    this.clear();
+    try {
+      storage(remember ? 'localStorage' : 'sessionStorage')?.setItem(keys.authToken, token);
+    } catch (e) {
+      console.warn('Failed to store the login token: ' + e);
+    }
+  },
+  clear() {
+    for (const name of ['localStorage', 'sessionStorage'] as const) {
+      try {
+        storage(name)?.removeItem(keys.authToken);
+      } catch (e) {
+        console.warn('Failed to remove the login token: ' + e);
+      }
+    }
+  },
+};
+
+export { authToken, config, getClientId, getPersistentValue, normalizeBaseUrl, setPersistentValue, Theme, uuidv4 };

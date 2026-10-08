@@ -11,6 +11,8 @@ type DialogProps = {
   onClose: (apply: boolean) => void;
   // Shown at the start of the footer, before Cancel and OK
   footerStart?: ReactNode;
+  okLabel?: string;
+  okDisabled?: boolean;
   children: ReactNode;
 };
 
@@ -42,8 +44,8 @@ export default function Dialog(props: DialogProps) {
           <Button variant="outline-secondary" onClick={() => props.onClose(false)}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={() => props.onClose(true)}>
-            OK
+          <Button variant="primary" disabled={props.okDisabled} onClick={() => props.onClose(true)}>
+            {props.okLabel ?? 'OK'}
           </Button>
         </div>
       </Modal.Footer>

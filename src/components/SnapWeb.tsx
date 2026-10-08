@@ -3,6 +3,7 @@ import { Alert, Button, Spinner } from 'react-bootstrap';
 import { Play, Settings, Square } from 'lucide-react';
 import Server from './Server';
 import SettingsDialog from './Settings';
+import LoginDialog from './Login';
 import UndoDeleteNotice from './UndoDeleteNotice';
 import { Theme, config, getClientId } from '../config';
 import { SnapControl, Snapcast } from '../snapcontrol';
@@ -33,6 +34,10 @@ export default function SnapWeb() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isConnected, setConnected] = useState(false);
   const [connectError, setConnectError] = useState('');
+  // The server wants a login; the dialog asks for it, and once cancelled a
+  // notice offers it again
+  const [authRequired, setAuthRequired] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
   // Kept here rather than in the groups, so a pending delete survives its
   // group being re-rendered, emptied or replaced by a server update
   const [deletedClients, setDeletedClients] = useState<{ id: string; name: string }[]>([]);
@@ -41,12 +46,15 @@ export default function SnapWeb() {
   const handlersRef = useRef<{
     onChange: (server: Snapcast.Server) => void;
     onConnectionChanged: (connected: boolean, error?: string) => void;
+    onAuthRequired: (required: boolean) => void;
   } | null>(null);
   const [snapControl] = useState(() => {
     const control = new SnapControl();
     control.onChange = (_control: SnapControl, server: Snapcast.Server) => handlersRef.current?.onChange(server);
     control.onConnectionChanged = (_control: SnapControl, connected: boolean, error?: string) =>
       handlersRef.current?.onConnectionChanged(connected, error);
+    control.onAuthRequired = (_control: SnapControl, required: boolean) =>
+      handlersRef.current?.onAuthRequired(required);
     return control;
   });
 
@@ -97,9 +105,20 @@ export default function SnapWeb() {
     setConnected(connected);
   }
 
+  // SnapControl reports changes only, so the dialog opens once per login
+  // needed rather than on every reconnect
+  function handleAuthRequired(required: boolean) {
+    setAuthRequired(required);
+    setLoginOpen(required);
+  }
+
   // Refresh on every render so the SnapControl callbacks always see the latest state
   useEffect(() => {
-    handlersRef.current = { onChange: handleChange, onConnectionChanged: handleConnectionChanged };
+    handlersRef.current = {
+      onChange: handleChange,
+      onConnectionChanged: handleConnectionChanged,
+      onAuthRequired: handleAuthRequired,
+    };
   });
 
   useEffect(() => {
@@ -163,6 +182,23 @@ export default function SnapWeb() {
     );
   }
 
+  function loginAlert() {
+    if (!isConnected || !authRequired || loginOpen) return null;
+    return (
+      <Alert variant="danger" className="d-flex align-items-center gap-3 py-2 pe-2">
+        <div className="flex-grow-1 fw-semibold">Login required</div>
+        <Button
+          variant="link"
+          size="sm"
+          className="fw-semibold text-decoration-none"
+          onClick={() => setLoginOpen(true)}
+        >
+          Log in
+        </Button>
+      </Alert>
+    );
+  }
+
   return (
     <>
       <header className="app-header sticky-top border-bottom">
@@ -200,22 +236,41 @@ export default function SnapWeb() {
         deletedClientIds={deletedClients.map(({ id }) => id)}
         onClientDelete={handleClientDelete}
       />
-      {(deletedClients.length > 0 || !isConnected) && (
+      {(deletedClients.length > 0 || !isConnected || (authRequired && !loginOpen)) && (
         <div className="notice-stack">
           {deletedClients.map(({ id, name }) => (
             <UndoDeleteNotice key={id} name={name} onClose={(undo) => handleUndoDeleteClose(id, undo)} />
           ))}
           {connectionAlert()}
+          {loginAlert()}
         </div>
+      )}
+      {/* Mounted only while open, so the password isn't kept around */}
+      {loginOpen && (
+        <LoginDialog
+          open
+          onLogin={async (username, password, remember) => {
+            await snapControl.login(username, password, remember);
+            setLoginOpen(false);
+          }}
+          onCancel={() => setLoginOpen(false)}
+        />
       )}
       {/* Mounted only while open, so it starts from the saved settings each time */}
       {settingsOpen && (
         <SettingsDialog
           open
+          loggedIn={snapControl.loggedIn}
+          onLogout={() => {
+            setSettingsOpen(false);
+            snapControl.logout();
+          }}
           onClose={(apply: boolean) => {
             setSettingsOpen(false);
             if (apply) {
               if (config.baseUrl !== serverUrl) {
+                // The login belongs to the old server
+                snapControl.forgetLogin();
                 // The audio stream is still connected to the old server
                 setIsPlaying(false);
                 setServer(new Snapcast.Server());

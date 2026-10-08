@@ -19,3 +19,14 @@ They change live server state, so they:
   handshake, and delete only that client afterwards
 
 Stream switching is skipped on servers with a single stream.
+
+For a server that requires a login, also set `SNAPSERVER_USER` and
+`SNAPSERVER_PASSWORD`. The tests then log in when the server asks, and
+`auth.test.ts` checks the login itself: a wrong password is refused, the
+status loads after logging in, the token (or, on servers without
+`Server.GetToken`, the Basic login) works on a new connection, and an invalid
+token asks for a login again. These are skipped without a user name:
+
+```sh
+SNAPSERVER_URL=ws://10.10.1.1:1780 SNAPSERVER_USER=admin SNAPSERVER_PASSWORD=secret npm run test:integration
+```

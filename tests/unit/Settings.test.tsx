@@ -63,4 +63,14 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog open={false} onClose={vi.fn()} />);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('offers to log out only while logged in', async () => {
+    const onLogout = vi.fn();
+    const { rerender } = render(<SettingsDialog open onClose={vi.fn()} onLogout={onLogout} />);
+    expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument();
+
+    rerender(<SettingsDialog open loggedIn onClose={vi.fn()} onLogout={onLogout} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Log out' }));
+    expect(onLogout).toHaveBeenCalledOnce();
+  });
 });

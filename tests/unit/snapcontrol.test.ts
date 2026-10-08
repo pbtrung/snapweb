@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { SnapControl, Snapcast } from '../../src/snapcontrol';
+import { SnapControl, Snapcast, base64, needsLogin } from '../../src/snapcontrol';
+import { authToken } from '../../src/config';
 import { FakeWebSocket } from '../helpers/fakeWebSocket';
-import { quietConsole } from '../helpers/snapControl';
+import { quietConsole, requests } from '../helpers/snapControl';
 import { makeClient, makeServerStatus, makeStream } from '../fixtures/serverStatus';
 
 describe('Snapcast model', () => {
@@ -86,10 +87,26 @@ describe('Snapcast model', () => {
   });
 });
 
+describe('login helpers', () => {
+  it('recognizes the errors that ask for a login', () => {
+    expect(needsLogin({ code: 401, message: 'Unauthorized' })).toBe(true);
+    expect(needsLogin({ code: -32000, message: 'Unauthorized' })).toBe(true);
+    expect(needsLogin({ code: -32000, message: 'Internal error' })).toBe(false);
+    expect(needsLogin({ code: -32601, message: 'Method not found' })).toBe(false);
+    expect(needsLogin(undefined)).toBe(false);
+  });
+
+  it('encodes Basic credentials as UTF-8 base64', () => {
+    expect(base64('admin:secret')).toBe('YWRtaW46c2VjcmV0');
+    expect(base64('jürgen:pässwört ⚡')).toBe(Buffer.from('jürgen:pässwört ⚡', 'utf8').toString('base64'));
+  });
+});
+
 describe('SnapControl', () => {
   let control: SnapControl;
   let onChange: Mock<NonNullable<SnapControl['onChange']>>;
   let onConnectionChanged: Mock<NonNullable<SnapControl['onConnectionChanged']>>;
+  let onAuthRequired: Mock<NonNullable<SnapControl['onAuthRequired']>>;
 
   function connected(status = makeServerStatus()): FakeWebSocket {
     control.connect('ws://snapserver:1780');
@@ -111,6 +128,8 @@ describe('SnapControl', () => {
     onConnectionChanged = vi.fn<NonNullable<SnapControl['onConnectionChanged']>>();
     control.onChange = onChange;
     control.onConnectionChanged = onConnectionChanged;
+    onAuthRequired = vi.fn<NonNullable<SnapControl['onAuthRequired']>>();
+    control.onAuthRequired = onAuthRequired;
   });
 
   afterEach(() => {
@@ -210,11 +229,13 @@ describe('SnapControl', () => {
     });
 
     it('refetches the status when a request fails', () => {
+      vi.useFakeTimers();
       const ws = connected();
       control.setStream('g1', 'bogus');
       expect(control.getGroup('g1').stream_id).toBe('bogus');
 
       ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', error: { code: -32603, message: 'Stream not found' } });
+      vi.advanceTimersByTime(1000);
       const request = ws.lastSent();
       expect(request.method).toBe('Server.GetStatus');
 
@@ -223,6 +244,7 @@ describe('SnapControl', () => {
     });
 
     it('refetches the status when the status request fails', () => {
+      vi.useFakeTimers();
       const ws = connected();
       control.setClients('g1', ['c1', 'c2', 'gone']);
       const failed = ws.lastSent().id;
@@ -230,6 +252,7 @@ describe('SnapControl', () => {
       expect(() =>
         ws.receive({ id: failed, jsonrpc: '2.0', error: { code: -32603, message: 'Client not found' } }),
       ).not.toThrow();
+      vi.advanceTimersByTime(1000);
       expect(ws.lastSent()).toMatchObject({ method: 'Server.GetStatus' });
       expect(ws.lastSent().id).not.toBe(failed);
     });
@@ -569,6 +592,350 @@ describe('SnapControl', () => {
       control.onChange = null;
       expect(() => notify('Group.OnMute', { id: 'g1', mute: true })).not.toThrow();
       expect(control.getGroup('g1').muted).toBe(true);
+    });
+  });
+
+  describe('error backoff', () => {
+    function lastStatusRequest(ws: FakeWebSocket) {
+      return requests(ws, 'Server.GetStatus').slice(-1)[0];
+    }
+
+    function failRequest(ws: FakeWebSocket, request: { id: number }, code = -32603) {
+      ws.receive({ id: request.id, jsonrpc: '2.0', error: { code, message: 'Internal error' } });
+    }
+
+    it('refetches with a delay that doubles while the status keeps failing, up to 30 s', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      control.setStream('g1', 'bogus');
+      failRequest(ws, ws.lastSent());
+
+      for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+        const before = requests(ws, 'Server.GetStatus').length;
+        vi.advanceTimersByTime(delay - 1);
+        expect(requests(ws, 'Server.GetStatus')).toHaveLength(before);
+        vi.advanceTimersByTime(1);
+        expect(requests(ws, 'Server.GetStatus')).toHaveLength(before + 1);
+        failRequest(ws, lastStatusRequest(ws));
+      }
+    });
+
+    it('starts over at 1 s once a status arrives', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      control.setStream('g1', 'bogus');
+      failRequest(ws, ws.lastSent());
+      vi.advanceTimersByTime(1000);
+      failRequest(ws, lastStatusRequest(ws));
+      vi.advanceTimersByTime(2000);
+      ws.receive({ id: lastStatusRequest(ws).id, jsonrpc: '2.0', result: { server: makeServerStatus() } });
+
+      control.muteGroup('g1', true);
+      failRequest(ws, ws.lastSent());
+      const before = requests(ws, 'Server.GetStatus').length;
+      vi.advanceTimersByTime(1000);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(before + 1);
+    });
+
+    it('coalesces failures into one pending refetch', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      ws.sent = [];
+      control.setStream('g1', 's2');
+      control.muteGroup('g1', true);
+      control.setVolume('c1', 10);
+      for (const request of [...ws.sent]) failRequest(ws, request);
+
+      vi.advanceTimersByTime(1000);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(1);
+      vi.advanceTimersByTime(60000);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(1);
+    });
+
+    it('does not refetch after a stream control error', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      ws.sent = [];
+      control.control('s1', 'play');
+      ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', error: { code: 1, message: 'Stream can not be controlled' } });
+
+      vi.advanceTimersByTime(5000);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(0);
+    });
+
+    it('cancels a pending refetch on disconnect', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      control.muteGroup('g1', true);
+      failRequest(ws, ws.lastSent());
+      control.disconnect();
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  describe('authentication', () => {
+    const unauthorized = { code: 401, message: 'Unauthorized' };
+
+    beforeEach(() => {
+      window.localStorage.clear();
+      window.sessionStorage.clear();
+    });
+
+    // Lets the async login steps run after a reply
+    async function settle() {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    }
+
+    function opened(): FakeWebSocket {
+      control.connect('ws://snapserver:1780');
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      return ws;
+    }
+
+    // A connection whose status request asked for a login
+    function needingLogin(): FakeWebSocket {
+      const ws = opened();
+      ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', error: unauthorized });
+      return ws;
+    }
+
+    function reply(ws: FakeWebSocket, request: { id: number }, result: unknown) {
+      ws.receive({ id: request.id, jsonrpc: '2.0', result });
+    }
+
+    function fail(ws: FakeWebSocket, request: { id: number }, error: unknown) {
+      ws.receive({ id: request.id, jsonrpc: '2.0', error });
+    }
+
+    it('asks for a login when the status needs one, and does not refetch', () => {
+      vi.useFakeTimers();
+      const ws = needingLogin();
+
+      expect(onAuthRequired).toHaveBeenCalledExactlyOnceWith(control, true);
+      expect(control.authRequired).toBe(true);
+      vi.advanceTimersByTime(25000);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(1);
+    });
+
+    it('also asks for a login on -32000 Unauthorized from older servers', () => {
+      const ws = opened();
+      fail(ws, ws.lastSent(), { code: -32000, message: 'Unauthorized' });
+      expect(onAuthRequired).toHaveBeenCalledWith(control, true);
+    });
+
+    it('asks only once while the login is missing, across reconnects', () => {
+      vi.useFakeTimers();
+      needingLogin().drop();
+      vi.advanceTimersByTime(1000);
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      fail(ws, ws.lastSent(), unauthorized);
+
+      expect(onAuthRequired).toHaveBeenCalledTimes(1);
+    });
+
+    it('logs in with Basic, then fetches the status and a token', async () => {
+      const ws = needingLogin();
+      ws.sent = [];
+      const login = control.login('admin', 'pässwort', false);
+
+      expect(ws.sent).toEqual([
+        {
+          id: expect.any(Number),
+          jsonrpc: '2.0',
+          method: 'Server.Authenticate',
+          params: { scheme: 'Basic', param: base64('admin:pässwort') },
+        },
+      ]);
+      reply(ws, ws.sent[0], 'ok');
+      await settle();
+      expect(ws.sent.map((m) => m.method)).toEqual(['Server.Authenticate', 'Server.GetStatus', 'Server.GetToken']);
+      expect(ws.sent[2].params).toEqual({ username: 'admin', password: 'pässwort' });
+      expect(onAuthRequired).toHaveBeenLastCalledWith(control, false);
+
+      reply(ws, ws.sent[1], { server: makeServerStatus() });
+      expect(control.server.groups).toHaveLength(2);
+      reply(ws, ws.sent[2], { token: 'jwt' });
+      await login;
+
+      expect(control.token).toBe('jwt');
+      expect(control.basic).toBeUndefined();
+      expect(control.loggedIn).toBe(true);
+    });
+
+    it('stores the token for the session only, without Remember me', async () => {
+      const ws = needingLogin();
+      const login = control.login('admin', 'secret', false);
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      reply(ws, requests(ws, 'Server.GetToken')[0], { token: 'jwt' });
+      await login;
+
+      expect(window.sessionStorage.getItem('auth.token')).toBe('jwt');
+      expect(window.localStorage.getItem('auth.token')).toBeNull();
+    });
+
+    it('stores the token in localStorage with Remember me', async () => {
+      const ws = needingLogin();
+      const login = control.login('admin', 'secret', true);
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      reply(ws, requests(ws, 'Server.GetToken')[0], { token: 'jwt' });
+      await login;
+
+      expect(window.localStorage.getItem('auth.token')).toBe('jwt');
+      expect(window.sessionStorage.getItem('auth.token')).toBeNull();
+    });
+
+    it('keeps the login in memory only when the server has no Server.GetToken', async () => {
+      const ws = needingLogin();
+      const login = control.login('admin', 'secret', true);
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      fail(ws, requests(ws, 'Server.GetToken')[0], { code: -32601, message: 'Method not found' });
+      await login;
+
+      expect(control.token).toBeUndefined();
+      expect(control.basic).toBe(base64('admin:secret'));
+      expect(window.localStorage.getItem('auth.token')).toBeNull();
+      expect(window.sessionStorage.getItem('auth.token')).toBeNull();
+      expect(JSON.stringify({ ...window.localStorage })).not.toContain('secret');
+
+      // and sends it again after reconnecting
+      ws.drop();
+      control.connect('ws://snapserver:1780');
+      const next = FakeWebSocket.latest();
+      next.open();
+      expect(next.sent).toEqual([
+        expect.objectContaining({
+          method: 'Server.Authenticate',
+          params: { scheme: 'Basic', param: base64('admin:secret') },
+        }),
+      ]);
+    });
+
+    it('rejects a wrong password without fetching anything', async () => {
+      const ws = needingLogin();
+      ws.sent = [];
+      const login = control.login('admin', 'wrong', true);
+      fail(ws, ws.lastSent(), unauthorized);
+
+      await expect(login).rejects.toThrow('Wrong user name or password');
+      expect(ws.sent).toHaveLength(1);
+      expect(control.loggedIn).toBe(false);
+      expect(control.authRequired).toBe(true);
+    });
+
+    it('fails to log in while not connected', async () => {
+      control.connect('ws://snapserver:1780');
+      await expect(control.login('admin', 'secret', false)).rejects.toThrow('Not connected to Snapserver');
+    });
+
+    it('authenticates with the stored token before anything else on connect', async () => {
+      authToken.set('jwt', true);
+      const ws = opened();
+
+      expect(ws.sent).toEqual([
+        expect.objectContaining({ method: 'Server.Authenticate', params: { scheme: 'Bearer', param: 'jwt' } }),
+      ]);
+      // Held back until the login is answered
+      control.control('s1', 'play');
+      expect(ws.sent).toHaveLength(1);
+
+      reply(ws, ws.sent[0], 'ok');
+      await settle();
+      expect(ws.sent.map((m) => m.method)).toEqual(['Server.Authenticate', 'Stream.Control', 'Server.GetStatus']);
+      reply(ws, requests(ws, 'Server.GetStatus')[0], { server: makeServerStatus() });
+      expect(control.server.groups).toHaveLength(2);
+      expect(onAuthRequired).not.toHaveBeenCalled();
+    });
+
+    it('sends the keepalive while the login is answered', () => {
+      vi.useFakeTimers();
+      authToken.set('jwt', true);
+      const ws = opened();
+      vi.advanceTimersByTime(10000);
+
+      expect(ws.sent.map((m) => m.method)).toEqual(['Server.Authenticate', 'Server.GetRPCVersion']);
+    });
+
+    it('authenticates with the token again after the keepalive reconnects', async () => {
+      vi.useFakeTimers();
+      control.token = 'jwt';
+      const ws = opened();
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      reply(ws, requests(ws, 'Server.GetStatus')[0], { server: makeServerStatus() });
+
+      vi.advanceTimersByTime(40000);
+      const next = FakeWebSocket.latest();
+      expect(next).not.toBe(ws);
+      next.open();
+      expect(next.sent).toEqual([
+        expect.objectContaining({ method: 'Server.Authenticate', params: { scheme: 'Bearer', param: 'jwt' } }),
+      ]);
+    });
+
+    it('asks for a new login when the token expired', async () => {
+      authToken.set('expired', true);
+      const ws = opened();
+      fail(ws, ws.lastSent(), unauthorized);
+      await settle();
+
+      expect(onAuthRequired).toHaveBeenCalledExactlyOnceWith(control, true);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(0);
+      expect(control.token).toBeUndefined();
+      expect(authToken.get()).toBeUndefined();
+    });
+
+    it('falls back to the Basic login held in memory when the token is rejected', async () => {
+      control.token = 'expired';
+      control.basic = base64('admin:secret');
+      const ws = opened();
+      fail(ws, ws.lastSent(), unauthorized);
+      await settle();
+
+      expect(ws.lastSent()).toMatchObject({
+        method: 'Server.Authenticate',
+        params: { scheme: 'Basic', param: base64('admin:secret') },
+      });
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      expect(ws.lastSent()).toMatchObject({ method: 'Server.GetStatus' });
+      expect(control.token).toBeUndefined();
+      expect(onAuthRequired).not.toHaveBeenCalled();
+    });
+
+    it('requests the status when the server does not know Server.Authenticate', async () => {
+      control.token = 'jwt';
+      const ws = opened();
+      fail(ws, ws.lastSent(), { code: -32601, message: 'Method not found' });
+      await settle();
+
+      expect(ws.lastSent()).toMatchObject({ method: 'Server.GetStatus' });
+    });
+
+    it('forgets the login and reconnects on logout', async () => {
+      authToken.set('jwt', true);
+      const ws = opened();
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      control.logout();
+
+      expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+      expect(authToken.get()).toBeUndefined();
+      expect(control.loggedIn).toBe(false);
+      const next = FakeWebSocket.latest();
+      next.open();
+      expect(next.sent).toEqual([expect.objectContaining({ method: 'Server.GetStatus' })]);
+    });
+
+    it('stops asking for a login when it is forgotten', () => {
+      needingLogin();
+      control.forgetLogin();
+      expect(onAuthRequired).toHaveBeenLastCalledWith(control, false);
     });
   });
 });

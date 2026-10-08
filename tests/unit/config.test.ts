@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  authToken,
   config,
   getClientId,
   getPersistentValue,
@@ -116,5 +117,20 @@ describe('normalizeBaseUrl', () => {
     config.baseUrl = '';
     expect(window.localStorage.getItem('snapserver.host')).toBe('');
     expect(config.baseUrl).toBe('ws://' + window.location.host);
+  });
+
+  it('keeps the login token for the session, or in localStorage when remembered', () => {
+    window.sessionStorage.clear();
+    authToken.set('session', false);
+    expect(window.sessionStorage.getItem('auth.token')).toBe('session');
+    expect(authToken.get()).toBe('session');
+
+    authToken.set('remembered', true);
+    expect(window.localStorage.getItem('auth.token')).toBe('remembered');
+    expect(window.sessionStorage.getItem('auth.token')).toBeNull();
+    expect(authToken.get()).toBe('remembered');
+
+    authToken.clear();
+    expect(authToken.get()).toBeUndefined();
   });
 });

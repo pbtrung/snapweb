@@ -3,6 +3,9 @@ import { SnapControl, Snapcast } from '../../src/snapcontrol';
 
 // Base url of the Snapserver to test against, e.g. ws://10.10.1.1:1780
 export const serverUrl = process.env.SNAPSERVER_URL ?? '';
+// Login for a server that requires authentication
+export const username = process.env.SNAPSERVER_USER ?? '';
+export const password = process.env.SNAPSERVER_PASSWORD ?? '';
 
 export async function waitFor<T>(
   check: () => T | undefined | false | Promise<T | undefined | false>,
@@ -22,9 +25,15 @@ export async function waitFor<T>(
   }
 }
 
-// A SnapControl that has received the initial server status
+// A SnapControl that has received the initial server status, logged in
+// with SNAPSERVER_USER and SNAPSERVER_PASSWORD when the server asks
 export async function connect(): Promise<SnapControl> {
   const control = new SnapControl();
+  if (username) {
+    control.onAuthRequired = (control, required) => {
+      if (required) control.login(username, password, false).catch((e) => console.error('Login failed: ' + e));
+    };
+  }
   control.connect(serverUrl);
   try {
     // Notifications can arrive before the status response, so wait for the
