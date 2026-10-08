@@ -338,6 +338,7 @@ const RECONNECT_DELAY_MS = 1000;
 // The control connection is often idle for long stretches, and some proxies
 // and tunnels (e.g. Cloudflare) close idle WebSockets after 20-30 s
 const KEEPALIVE_INTERVAL_MS = 10000;
+const KEEPALIVE_TIMEOUT_MS = 3 * KEEPALIVE_INTERVAL_MS;
 
 class SnapControl {
   onChange: ((_this: SnapControl, _server: Snapcast.Server) => void) | null = null;
@@ -348,6 +349,7 @@ class SnapControl {
   status_req_id: number = -1;
   timer: ReturnType<typeof setTimeout> | null = null;
   keepalive: ReturnType<typeof setInterval> | null = null;
+  lastMessage: number = 0;
 
   public connect(baseUrl: string) {
     this.disconnect();
@@ -358,7 +360,19 @@ class SnapControl {
       connection.onopen = () => {
         console.info('Control connected to ' + baseUrl);
         this.status_req_id = this.sendRequest('Server.GetStatus');
-        this.keepalive = setInterval(() => this.sendRequest('Server.GetRPCVersion'), KEEPALIVE_INTERVAL_MS);
+        this.lastMessage = Date.now();
+        this.keepalive = setInterval(() => {
+          // A half-open connection (NAT timeout, network change) stays OPEN
+          // without delivering anything; reconnect when the keepalive replies
+          // stop arriving instead of waiting for the browser to notice
+          if (Date.now() - this.lastMessage > KEEPALIVE_TIMEOUT_MS) {
+            console.warn('Control connection to ' + baseUrl + ' stopped responding, reconnecting');
+            this.onConnectionChanged?.(this, false, 'Connection lost, trying to reconnect.');
+            this.connect(baseUrl);
+            return;
+          }
+          this.sendRequest('Server.GetRPCVersion');
+        }, KEEPALIVE_INTERVAL_MS);
         this.onConnectionChanged?.(this, true);
       };
       connection.onerror = (ev: Event) => {
@@ -487,7 +501,8 @@ class SnapControl {
   }
 
   public setVolume(client_id: string, percent: number, mute?: boolean) {
-    percent = Math.max(0, Math.min(100, percent));
+    // Snapserver stores whole percents
+    percent = Math.round(Math.max(0, Math.min(100, percent)));
     const client = this.getClient(client_id);
     client.config.volume.percent = percent;
     if (mute !== undefined) client.config.volume.muted = mute;
@@ -553,8 +568,22 @@ class SnapControl {
   }
 
   private onMessage(msg: string) {
-    const json_msg = JSON.parse(msg);
+    this.lastMessage = Date.now();
+    let json_msg;
+    try {
+      json_msg = JSON.parse(msg);
+    } catch (e) {
+      console.warn('Ignoring malformed control message: ' + e);
+      return;
+    }
     if (json_msg.id !== undefined) {
+      if (json_msg.error) {
+        // Requests change the model before the server answers, so a failed
+        // one (or a failed status request) leaves it out of line: refetch it
+        console.warn('Request ' + json_msg.id + ' failed:', json_msg.error);
+        this.status_req_id = this.sendRequest('Server.GetStatus');
+        return;
+      }
       // Responses only matter when they carry the server status
       if (json_msg.id !== this.status_req_id) return;
       this.server = new Snapcast.Server(json_msg.result.server);

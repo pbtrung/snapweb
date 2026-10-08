@@ -8,7 +8,8 @@ mobile devices, with the look and feel of
 
 Requires Node.js 22.22.2+, 24.15+ or 26+ (see `engines` in `package.json`).
 
-1. Add your snapserver host as a local environment var
+1. Point the dev server at your snapserver (the default is the page's own
+   host). This is only the default: a host entered in Settings takes over
     ```bash
     echo 'VITE_APP_SNAPSERVER_HOST = localhost:1780' > .env.local
     ```
@@ -36,6 +37,23 @@ Requires Node.js 22.22.2+, 24.15+ or 26+ (see `engines` in `package.json`).
 - Format with Prettier: `npm run format` (`npm run format:check` only checks)
 - Lint with ESLint: `npm run lint`
 
+## Install a release
+
+Releases are published as `snapweb-vX.Y.Z.zip` on
+[GitHub](https://github.com/pbtrung/snapweb/releases). `update-snapweb.sh`
+downloads one and installs it into `./snapweb`, replacing the previous
+version in one step:
+
+```bash
+./update-snapweb.sh            # the latest release
+./update-snapweb.sh v0.999.1   # a specific tag
+FORCE=1 ./update-snapweb.sh    # reinstall even if up to date
+SNAPWEB_DIR=/usr/share/snapserver/snapweb ./update-snapweb.sh
+```
+
+It needs `curl` or `wget`, and `unzip`. Point the `[http] doc_root` in your
+`snapserver.conf` at the install directory.
+
 ## Build for production
 
 1. Install dependencies: `npm ci`
@@ -46,8 +64,8 @@ Requires Node.js 22.22.2+, 24.15+ or 26+ (see `engines` in `package.json`).
    `http://<snapserver host>:1780`
 1. Enjoy :)
 
-Prebuilt versions of upstream Snapweb can be downloaded as zip archive or
-debian package in [Releases](https://github.com/snapcast/snapweb/releases).
+The app name and version come from `package.json`; bump `version` there
+before tagging a release.
 
 ## Setup as WebApp
 

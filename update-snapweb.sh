@@ -3,11 +3,19 @@
 # (or $SNAPWEB_DIR), without rebuilding anything.
 # Usage: update-snapweb.sh [tag]  (default: the latest release)
 #        FORCE=1 update-snapweb.sh  (reinstall even if up to date)
+#        SNAPWEB_DIR=/path update-snapweb.sh  (install somewhere else)
 set -e
 
 REPO="pbtrung/snapweb"
 DEST="${SNAPWEB_DIR:-./snapweb}"
+# Without a trailing slash, "$DEST.old" would end up inside $DEST
+DEST="${DEST%/}"
 TAG="${1:-latest}"
+
+command -v unzip >/dev/null 2>&1 || {
+  printf "unzip is required\n" >&2
+  exit 1
+}
 
 # fetch URL FILE ("-" for stdout), with curl or wget, whichever exists
 fetch() {
@@ -37,7 +45,7 @@ if [ -z "$tag" ] || [ -z "$url" ]; then
   exit 1
 fi
 
-if [ -z "$FORCE" ] && [ "$(cat "$DEST/.version" 2>/dev/null)" = "$tag" ]; then
+if [ "${FORCE:-0}" = 0 ] && [ "$(cat "$DEST/.version" 2>/dev/null)" = "$tag" ]; then
   printf "snapweb %s is already installed in %s\n" "$tag" "$DEST"
   exit 0
 fi
@@ -47,6 +55,8 @@ fi
 mkdir -p "$(dirname "$DEST")"
 tmp="$(mktemp -d "$(dirname "$DEST")/.snapweb.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
+# dash skips the EXIT trap when interrupted, so exit through it
+trap 'exit 1' INT TERM HUP
 
 printf "Downloading %s\n" "$url"
 fetch "$url" "$tmp/snapweb.zip"

@@ -79,11 +79,14 @@ function defaultBaseUrl(): string {
   return (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + host;
 }
 
-// Accepts "host:1780", "http(s)://host:1780" or "ws(s)://host:1780/" and
-// returns "ws(s)://host:1780", which the /jsonrpc and /stream paths are
-// appended to. An empty value means the default.
+// Accepts "host:1780", "http(s)://host:1780", "ws(s)://host:1780/" or
+// "ws(s)://host:1780/jsonrpc" and returns "ws(s)://host:1780", which the
+// /jsonrpc and /stream paths are appended to. An empty value means the default.
 function normalizeBaseUrl(value: string): string {
-  let url = value.trim().replace(/\/+$/, '');
+  let url = value
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/(jsonrpc|stream)$/i, '');
   if (url === '') return defaultBaseUrl();
   url = url.replace(/^http(s?):\/\//i, (_, secure: string) => (secure ? 'wss://' : 'ws://'));
   if (!/^wss?:\/\//i.test(url)) url = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + url;
@@ -91,11 +94,14 @@ function normalizeBaseUrl(value: string): string {
 }
 
 const config = {
+  // The default is stored as '' rather than as a url, so it follows the page
+  // location and VITE_APP_SNAPSERVER_HOST instead of being frozen
   get baseUrl() {
-    return normalizeBaseUrl(getPersistentValue(keys.snapserver_host, defaultBaseUrl()));
+    return normalizeBaseUrl(readPersistentValue(keys.snapserver_host) ?? '');
   },
   set baseUrl(value) {
-    setPersistentValue(keys.snapserver_host, normalizeBaseUrl(value));
+    const url = normalizeBaseUrl(value);
+    setPersistentValue(keys.snapserver_host, url === defaultBaseUrl() ? '' : url);
   },
   get theme() {
     const theme = getPersistentValue(keys.theme, Theme.System);

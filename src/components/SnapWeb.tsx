@@ -3,6 +3,7 @@ import { Alert, Button, Spinner } from 'react-bootstrap';
 import { Play, Settings, Square } from 'lucide-react';
 import Server from './Server';
 import SettingsDialog from './Settings';
+import UndoDeleteNotice from './UndoDeleteNotice';
 import { Theme, config, getClientId } from '../config';
 import { SnapControl, Snapcast } from '../snapcontrol';
 import type { SnapStream } from '../snapstream';
@@ -32,6 +33,9 @@ export default function SnapWeb() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isConnected, setConnected] = useState(false);
   const [connectError, setConnectError] = useState('');
+  // Kept here rather than in the groups, so a pending delete survives its
+  // group being re-rendered, emptied or replaced by a server update
+  const [deletedClients, setDeletedClients] = useState<{ id: string; name: string }[]>([]);
   const snapstreamRef = useRef<SnapStream | null>(null);
   const audioRef = useRef(new Audio());
   const handlersRef = useRef<{
@@ -84,7 +88,11 @@ export default function SnapWeb() {
     // playback carries on while the control connection is re-established
     if (!connected) {
       setServer(new Snapcast.Server());
+      // Kept while reconnecting, so a lost connection doesn't flicker
+      // between the error and "Connecting..." on every retry
       if (error) setConnectError(error);
+    } else {
+      setConnectError('');
     }
     setConnected(connected);
   }
@@ -123,26 +131,35 @@ export default function SnapWeb() {
     };
   }, [isPlaying]);
 
+  function handleClientDelete(client: Snapcast.Client) {
+    setDeletedClients((clients) =>
+      clients.some(({ id }) => id === client.id) ? clients : [...clients, { id: client.id, name: client.getName() }],
+    );
+  }
+
+  function handleUndoDeleteClose(clientId: string, undo: boolean) {
+    if (!undo) snapControl.deleteClient(clientId);
+    setDeletedClients((clients) => clients.filter(({ id }) => id !== clientId));
+  }
+
   function connectionAlert() {
     if (isConnected) return null;
     return (
-      <div className="notice-stack">
-        <Alert variant={connectError ? 'danger' : 'light'} className="d-flex align-items-center gap-3 py-2 pe-2">
-          {!connectError && <Spinner animation="border" size="sm" className="flex-shrink-0" aria-hidden="true" />}
-          <div className="flex-grow-1 overflow-hidden">
-            <div className="fw-semibold">{connectError || 'Connecting...'}</div>
-            <div className="small text-truncate opacity-75">Snapserver host: {serverUrl}</div>
-          </div>
-          <Button
-            variant="link"
-            size="sm"
-            className="fw-semibold text-decoration-none"
-            onClick={() => setSettingsOpen(true)}
-          >
-            Settings
-          </Button>
-        </Alert>
-      </div>
+      <Alert variant={connectError ? 'danger' : 'light'} className="d-flex align-items-center gap-3 py-2 pe-2">
+        {!connectError && <Spinner animation="border" size="sm" className="flex-shrink-0" aria-hidden="true" />}
+        <div className="flex-grow-1 overflow-hidden">
+          <div className="fw-semibold">{connectError || 'Connecting...'}</div>
+          <div className="small text-truncate opacity-75">Snapserver host: {serverUrl}</div>
+        </div>
+        <Button
+          variant="link"
+          size="sm"
+          className="fw-semibold text-decoration-none"
+          onClick={() => setSettingsOpen(true)}
+        >
+          Settings
+        </Button>
+      </Alert>
     );
   }
 
@@ -161,7 +178,8 @@ export default function SnapWeb() {
             >
               <Settings size={18} />
             </button>
-            {isConnected && (
+            {/* Playback carries on without the control connection, so it can always be stopped */}
+            {(isConnected || isPlaying) && (
               <button
                 type="button"
                 className={'btn btn-icon ' + (isPlaying ? 'btn-primary' : 'btn-outline-primary')}
@@ -175,8 +193,21 @@ export default function SnapWeb() {
           </div>
         </nav>
       </header>
-      <Server server={server} snapcontrol={snapControl} showOffline={showOffline} />
-      {connectionAlert()}
+      <Server
+        server={server}
+        snapcontrol={snapControl}
+        showOffline={showOffline}
+        deletedClientIds={deletedClients.map(({ id }) => id)}
+        onClientDelete={handleClientDelete}
+      />
+      {(deletedClients.length > 0 || !isConnected) && (
+        <div className="notice-stack">
+          {deletedClients.map(({ id, name }) => (
+            <UndoDeleteNotice key={id} name={name} onClose={(undo) => handleUndoDeleteClose(id, undo)} />
+          ))}
+          {connectionAlert()}
+        </div>
+      )}
       {/* Mounted only while open, so it starts from the saved settings each time */}
       {settingsOpen && (
         <SettingsDialog
@@ -188,6 +219,7 @@ export default function SnapWeb() {
                 // The audio stream is still connected to the old server
                 setIsPlaying(false);
                 setServer(new Snapcast.Server());
+                setConnectError('');
               }
               setServerUrl(config.baseUrl);
               setTheme(config.theme);

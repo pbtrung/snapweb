@@ -3,5 +3,5 @@ coverage
 package-lock.json
 # Local Claude Code settings
 .claude
-# Keep hand-written docs and the changelog as they are
+# Keep hand-written docs as they are
 *.md

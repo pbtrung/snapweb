@@ -8,17 +8,20 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
   version: string;
 };
 
+// Shown in the Settings dialog and sent to Snapserver in the Hello message;
+// vitest.config.ts uses it too
+export const define = {
+  'import.meta.env.VITE_APP_NAME': JSON.stringify(pkg.name),
+  'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
   // index.html lives in src/; public/, .env.local and dist/ stay at the top level
   root: 'src',
   publicDir: '../public',
   envDir: '..',
-  define: {
-    // Shown in the Settings dialog and sent to Snapserver in the Hello message
-    'import.meta.env.VITE_APP_NAME': JSON.stringify(pkg.name),
-    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
-  },
+  define,
   server: {
     host: '127.0.0.1',
   },

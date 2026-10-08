@@ -172,18 +172,72 @@ describe('SnapControl', () => {
       expect(onChange).not.toHaveBeenCalled();
 
       ws.drop();
-      vi.advanceTimersByTime(30000);
-      expect(ws.sent).toHaveLength(sent + 1);
+      // Only the reconnect timer is left, not the keepalive
+      expect(vi.getTimerCount()).toBe(1);
     });
 
     it('stops the keepalive on disconnect', () => {
       vi.useFakeTimers();
-      const ws = connected();
-      const sent = ws.sent.length;
+      connected();
       control.disconnect();
-      vi.advanceTimersByTime(30000);
 
-      expect(ws.sent).toHaveLength(sent);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('stays connected while keepalive replies arrive', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      for (let i = 0; i < 6; i++) {
+        vi.advanceTimersByTime(10000);
+        ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', result: { major: 2, minor: 0, patch: 0 } });
+      }
+
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      expect(onConnectionChanged).not.toHaveBeenCalled();
+    });
+
+    it('reconnects when a half-open connection stops answering', () => {
+      vi.useFakeTimers();
+      const ws = connected();
+      vi.advanceTimersByTime(30000);
+      expect(FakeWebSocket.instances).toHaveLength(1);
+
+      vi.advanceTimersByTime(10000);
+      expect(onConnectionChanged).toHaveBeenCalledWith(control, false, 'Connection lost, trying to reconnect.');
+      expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(FakeWebSocket.latest().url).toBe('ws://snapserver:1780/jsonrpc');
+    });
+
+    it('refetches the status when a request fails', () => {
+      const ws = connected();
+      control.setStream('g1', 'bogus');
+      expect(control.getGroup('g1').stream_id).toBe('bogus');
+
+      ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', error: { code: -32603, message: 'Stream not found' } });
+      const request = ws.lastSent();
+      expect(request.method).toBe('Server.GetStatus');
+
+      ws.receive({ id: request.id, jsonrpc: '2.0', result: { server: makeServerStatus() } });
+      expect(control.getGroup('g1').stream_id).toBe('s1');
+    });
+
+    it('refetches the status when the status request fails', () => {
+      const ws = connected();
+      control.setClients('g1', ['c1', 'c2', 'gone']);
+      const failed = ws.lastSent().id;
+
+      expect(() =>
+        ws.receive({ id: failed, jsonrpc: '2.0', error: { code: -32603, message: 'Client not found' } }),
+      ).not.toThrow();
+      expect(ws.lastSent()).toMatchObject({ method: 'Server.GetStatus' });
+      expect(ws.lastSent().id).not.toBe(failed);
+    });
+
+    it('ignores malformed messages', () => {
+      const ws = connected();
+      expect(() => ws.onmessage?.({ data: '{not json' })).not.toThrow();
+      expect(onChange).not.toHaveBeenCalled();
     });
 
     it('retries when the WebSocket constructor throws', () => {
@@ -319,6 +373,12 @@ describe('SnapControl', () => {
 
       control.setVolume('c1', -5);
       expect(ws.lastSent().params.volume).toEqual({ muted: true, percent: 0 });
+    });
+
+    it('rounds client volume to whole percents', () => {
+      control.setVolume('c1', 33.333);
+      expect(ws.lastSent().params.volume.percent).toBe(33);
+      expect(control.getClient('c1').config.volume.percent).toBe(33);
     });
 
     it('uses increasing request ids', () => {

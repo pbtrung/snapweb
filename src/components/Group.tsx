@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Form } from 'react-bootstrap';
+import { useRef, useState } from 'react';
+import { Form } from 'react-bootstrap';
 import { Clock, FolderOpen, Pause, Play, Settings2, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
 import Dialog, { DialogSection } from './Dialog';
@@ -17,6 +17,9 @@ type GroupProps = {
   group: Snapcast.Group;
   snapcontrol: SnapControl;
   showOffline: boolean;
+  // Clients waiting for their delete to be undone or carried out, hidden here
+  deletedClientIds: string[];
+  onClientDelete: (client: Snapcast.Client) => void;
 };
 
 // Client volumes at the start of a group volume drag, which the drag scales from
@@ -24,9 +27,6 @@ type VolumeDrag = {
   clientVolumes: Map<string, number>;
   groupVolume: number;
 };
-
-// How long "Deleted <client>" can be undone before the client is deleted
-const UNDO_DELETE_MS = 6000;
 
 // Scale a client volume by the same ratio the group volume moved, towards
 // 0 when lowering and towards 100 when raising
@@ -46,35 +46,6 @@ function formatDuration(seconds: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
-// "Deleted <client>" with Undo; the client is deleted when it times out or is dismissed
-function UndoDeleteNotice(props: { name: string; onClose: (undo: boolean) => void }) {
-  const onCloseRef = useRef(props.onClose);
-  useEffect(() => {
-    onCloseRef.current = props.onClose;
-  });
-
-  useEffect(() => {
-    const timer = setTimeout(() => onCloseRef.current(false), UNDO_DELETE_MS);
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onCloseRef.current(false);
-    }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, []);
-
-  return (
-    <Alert variant="dark" className="d-flex align-items-center justify-content-between gap-3 py-2 pe-2">
-      <span className="text-truncate">Deleted {props.name}</span>
-      <Button variant="link" size="sm" className="fw-semibold text-decoration-none" onClick={() => props.onClose(true)}>
-        Undo
-      </Button>
-    </Alert>
-  );
-}
-
 export default function Group(props: GroupProps) {
   const [, setUpdate] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -82,8 +53,6 @@ export default function Group(props: GroupProps) {
   const [settingsStreamId, setSettingsStreamId] = useState('');
   // Cover art that failed to load, which is hidden like a missing one
   const [brokenArtUrl, setBrokenArtUrl] = useState('');
-  // Ids, since a server update replaces the client objects
-  const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
   const volumeDrag = useRef<VolumeDrag | null>(null);
 
   // The model is updated in place, so re-render to show the new values
@@ -93,7 +62,7 @@ export default function Group(props: GroupProps) {
 
   function getClients(): Snapcast.Client[] {
     return props.group.clients.filter(
-      (client) => (client.connected || props.showOffline) && !deletedClientIds.includes(client.id),
+      (client) => (client.connected || props.showOffline) && !props.deletedClientIds.includes(client.id),
     );
   }
 
@@ -135,15 +104,6 @@ export default function Group(props: GroupProps) {
     );
   }
 
-  function handleClientDelete(client: Snapcast.Client) {
-    if (!deletedClientIds.includes(client.id)) setDeletedClientIds([...deletedClientIds, client.id]);
-  }
-
-  function handleUndoDeleteClose(clientId: string, undo: boolean) {
-    if (!undo) props.snapcontrol.deleteClient(clientId);
-    setDeletedClientIds((ids) => ids.filter((id) => id !== clientId));
-  }
-
   function handleMuteClicked() {
     props.snapcontrol.muteGroup(props.group.id, !props.group.muted);
     refresh();
@@ -171,20 +131,8 @@ export default function Group(props: GroupProps) {
     props.snapcontrol.control(stream.id, stream.properties.playbackStatus === 'playing' ? 'pause' : 'play');
   }
 
-  const undoDeleteNotices = deletedClientIds.length > 0 && (
-    <div className="notice-stack" role="status">
-      {deletedClientIds.map((clientId) => (
-        <UndoDeleteNotice
-          key={clientId}
-          name={props.server.getClient(clientId)?.getName() ?? clientId}
-          onClose={(undo) => handleUndoDeleteClose(clientId, undo)}
-        />
-      ))}
-    </div>
-  );
-
   const clients = getClients();
-  if (clients.length === 0) return <>{undoDeleteNotices}</>;
+  if (clients.length === 0) return null;
 
   const groupName = props.group.name || 'group';
   const stream = props.server.getStream(props.group.stream_id);
@@ -218,7 +166,7 @@ export default function Group(props: GroupProps) {
               <button
                 type="button"
                 className="btn btn-ghost btn-icon"
-                aria-label="previous"
+                aria-label="Previous"
                 onClick={() => props.snapcontrol.control(stream.id, 'previous')}
               >
                 <SkipBack size={18} />
@@ -226,7 +174,7 @@ export default function Group(props: GroupProps) {
               <button
                 type="button"
                 className="btn btn-primary btn-icon"
-                aria-label="play/pause"
+                aria-label={isPlaying ? 'Pause' : 'Play'}
                 onClick={() => handlePlayPauseClicked(stream)}
               >
                 {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
@@ -234,7 +182,7 @@ export default function Group(props: GroupProps) {
               <button
                 type="button"
                 className="btn btn-ghost btn-icon"
-                aria-label="next"
+                aria-label="Next"
                 onClick={() => props.snapcontrol.control(stream.id, 'next')}
               >
                 <SkipForward size={18} />
@@ -312,7 +260,7 @@ export default function Group(props: GroupProps) {
             key={client.id}
             client={client}
             snapcontrol={props.snapcontrol}
-            onDelete={() => handleClientDelete(client)}
+            onDelete={() => props.onClientDelete(client)}
             onVolumeChange={refresh}
           />
         ))}
@@ -353,7 +301,6 @@ export default function Group(props: GroupProps) {
           </div>
         </DialogSection>
       </Dialog>
-      {undoDeleteNotices}
     </section>
   );
 }

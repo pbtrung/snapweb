@@ -91,6 +91,8 @@ describe('normalizeBaseUrl', () => {
     ['host:1780', 'ws://host:1780'],
     ['http://host:1780', 'ws://host:1780'],
     ['HTTPS://host:1780', 'wss://host:1780'],
+    ['ws://host:1780/jsonrpc', 'ws://host:1780'],
+    ['http://host:1780/stream/', 'ws://host:1780'],
   ])('turns %j into %j', (input, expected) => {
     expect(normalizeBaseUrl(input)).toBe(expected);
   });
@@ -102,5 +104,17 @@ describe('normalizeBaseUrl', () => {
   it('stores the normalized url', () => {
     config.baseUrl = 'host:1780/';
     expect(window.localStorage.getItem('snapserver.host')).toBe('ws://host:1780');
+  });
+
+  it('stores the default as empty, so it follows the page host', () => {
+    window.localStorage.clear();
+    expect(config.baseUrl).toBe('ws://' + window.location.host);
+    expect(window.localStorage.getItem('snapserver.host')).toBeNull();
+
+    config.baseUrl = window.location.host;
+    expect(window.localStorage.getItem('snapserver.host')).toBe('');
+    config.baseUrl = '';
+    expect(window.localStorage.getItem('snapserver.host')).toBe('');
+    expect(config.baseUrl).toBe('ws://' + window.location.host);
   });
 });

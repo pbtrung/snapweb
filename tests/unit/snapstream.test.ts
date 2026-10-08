@@ -20,6 +20,14 @@ describe('Tv', () => {
     expect(tv.usec).toBe(234500);
     expect(tv.getMilliseconds()).toBe(1234.5);
   });
+
+  it('keeps negative values', () => {
+    const tv = new Tv(0, 0);
+    tv.setMilliseconds(-1.5);
+    expect(tv.sec).toBe(-1);
+    expect(tv.usec).toBe(998500);
+    expect(tv.getMilliseconds()).toBe(-1.5);
+  });
 });
 
 describe('JsonMessage', () => {
@@ -341,6 +349,17 @@ describe('AudioStream playback', () => {
 
     expect(Array.from(buffer.channels[0]).map((sample) => Math.round((sample * 32768) / 1000))).toEqual([1, 3, 5, 6]);
     expect(stream.chunk!.idx).toBe(6);
+  });
+
+  it('corrects about one frame per ms of drift at real sample rates', () => {
+    const format = new SampleFormat();
+    format.rate = 48000;
+    const stream = new AudioStream(syncedProvider(), format, 1000);
+    // 1.5 ms late at 48 kHz is 72 frames, but only 2 are dropped per buffer
+    stream.addChunk(wireChunk(50000 - 1.5, new Array(2 * 960).fill(0), format));
+    stream.getNextBuffer(fakeBuffer(480) as any, 50000);
+
+    expect(stream.chunk!.idx).toBe(482);
   });
 
   it('slows down by repeating frames when slightly early', () => {

@@ -1,8 +1,10 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { define } from './vite.config';
 
 export default defineConfig({
   plugins: [react()],
+  define,
   test: {
     coverage: {
       provider: 'v8',

@@ -27,6 +27,8 @@ const PLAY_START_DELAY_S = 0.1; // headroom before the first buffer plays
 const HARD_SYNC_THRESHOLD_MS = 5; // beyond this, seek instead of adjusting frames
 const SOFT_SYNC_THRESHOLD_MS = 0.1; // below this, play as is
 const MAX_CHUNK_AGE_MS = 5000; // beyond the server buffer, chunks are dropped
+// FLAC__STREAM_DECODER_END_OF_STREAM; this and the states above it are final
+const FLAC_DECODER_END_OF_STREAM = 4;
 
 // Time sync
 const SYNC_INTERVAL_MS = 1000;
@@ -89,7 +91,8 @@ class Tv {
 
   setMilliseconds(ms: number) {
     this.sec = Math.floor(ms / 1000);
-    this.usec = Math.floor(ms * 1000) % 1000000;
+    // Relative to sec, so negative values keep 0 <= usec < 1000000
+    this.usec = Math.floor((ms - this.sec * 1000) * 1000);
   }
 
   getMilliseconds(): number {
@@ -437,6 +440,10 @@ class AudioStream {
         // Soft sync: read |addFrames| frames more (late) or fewer (early)
         // than the buffer holds, dropping or duplicating one frame every
         // everyN frames. read already counts the silence from a hard sync.
+        // addFrames is the age in ms taken as a frame count, as upstream
+        // does: a deliberately gentle correction of about 1 frame per ms of
+        // drift per buffer, which stays inaudible; larger offsets are left
+        // to the hard sync.
         let addFrames = 0;
         if (age > SOFT_SYNC_THRESHOLD_MS) addFrames = Math.ceil(age);
         else if (age < -SOFT_SYNC_THRESHOLD_MS) addFrames = Math.floor(age);
@@ -649,7 +656,13 @@ class FlacDecoder extends Decoder {
     this.pcmChunk.clearPayload();
     this.cacheInfo = { cachedBlocks: 0, isCachedChunk: true };
     while (this.flacChunk.byteLength > 0) {
-      if (!Flac.FLAC__stream_decoder_process_single(this.decoder)) {
+      // A read that finds no more data, e.g. after bytes without a frame
+      // sync, ends the stream, and then process_single keeps returning true
+      // without reading anything
+      if (
+        !Flac.FLAC__stream_decoder_process_single(this.decoder) ||
+        Flac.FLAC__stream_decoder_get_state(this.decoder) >= FLAC_DECODER_END_OF_STREAM
+      ) {
         // libflacjs has no flush, and a failed decoder stays failed, so
         // start over from the stream header
         console.warn('FLAC decoding failed, restarting the decoder');
@@ -767,16 +780,19 @@ class OpusDecoder extends Decoder {
       channels: this.sampleFormat.channels,
     });
     this.decoder = decoder;
-    this.ready = decoder.ready.then(() => decoder.reset());
+    this.ready = decoder.ready;
     this.ready.catch((err) => console.error('Failed to initialize Opus decoder:', err));
     return this.sampleFormat;
   }
 
   async decode(chunk: PcmChunkMessage): Promise<PcmChunkMessage | null> {
-    if (!this.decoder || !this.ready) return null;
+    const decoder = this.decoder;
+    if (!decoder || !this.ready) return null;
     try {
       await this.ready;
-      const decoded = this.decoder.decodeFrame(new Uint8Array(chunk.payload));
+      // Disposed while waiting
+      if (this.decoder !== decoder) return null;
+      const decoded = decoder.decodeFrame(new Uint8Array(chunk.payload));
       if (decoded.errors.length > 0) console.warn('Opus decode errors:', decoded.errors);
 
       const channels = this.sampleFormat.channels;
@@ -803,8 +819,14 @@ class OpusDecoder extends Decoder {
   }
 
   dispose() {
-    this.decoder?.free();
+    // free() needs the WASM instance, which only exists once ready resolves,
+    // e.g. when the next codec header or stop() comes in while it loads
+    const decoder = this.decoder;
     this.decoder = null;
+    this.ready?.then(
+      () => decoder?.free(),
+      () => {},
+    );
   }
 
   private decoder: WasmOpusDecoder<OpusDecoderSampleRate> | null = null;
@@ -1011,6 +1033,8 @@ class SnapStream {
     this.serverSettings = settings;
     this.applyVolume();
     this.bufferMs = settings.bufferMs - settings.latency;
+    // Also when the settings change after the codec header
+    if (this.stream) this.stream._bufferMs = this.bufferMs;
   }
 
   private handleTime(time: TimeMessage) {

@@ -49,4 +49,4 @@ description: Commit staged/modified changes with a detailed message and push, no
 - Never include Claude/AI co-authorship or attribution in the commit message.
 - Always push after committing — don't stop at just the local commit.
 - If the push fails (e.g. diverged branch), report the error and ask before force-pushing or rebasing.
-- Never commit build output (`dist/`) or local `.env` changes, such as a `VITE_APP_GITREV`.
+- Never commit build output (`dist/`) or `.env.local`.

@@ -106,7 +106,6 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
 
       try {
         actor.setClientLatency(client.id, latency);
-        // Client.OnLatencyChanged doesn't trigger onChange, but updates the model
         await waitFor(() => observer.getClient(client.id).config.latency === latency, 'Client.OnLatencyChanged');
         expect((await fetchStatus()).getClient(client.id)!.config.latency).toBe(latency);
       } finally {

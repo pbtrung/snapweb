@@ -108,10 +108,131 @@ describe('SnapWeb', () => {
     expect(screen.getByText('Kitchen')).toBeInTheDocument();
   });
 
-  it('opens the settings from the connection error', async () => {
+  it('opens the settings from the connection alert', async () => {
     render(<SnapWeb />);
     await userEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+  });
+
+  it('replaces a connection error once connected, or when the server url changes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<SnapWeb />);
+    act(() => connect().drop());
+    expect(screen.getByRole('alert')).toHaveTextContent('Connection lost, trying to reconnect.');
+
+    // Kept while retrying, rather than flickering back to "Connecting..."
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Connection lost, trying to reconnect.');
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(screen.getByRole('button', { name: 'Open settings' }));
+    const field = within(screen.getByRole('dialog')).getByLabelText('Snapserver host');
+    await user.clear(field);
+    await user.type(field, 'ws://other:1780');
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'OK' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Connecting...');
+    expect(screen.getByRole('alert')).toHaveTextContent('Snapserver host: ws://other:1780');
+    connect(socket('ws://other:1780/jsonrpc'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  describe('deleting a client', () => {
+    let user: ReturnType<typeof userEvent.setup>;
+
+    beforeEach(() => {
+      config.showOffline = true;
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    });
+
+    async function deleteClient(name: string) {
+      await user.click(screen.getByRole('button', { name: 'Settings for ' + name }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    }
+
+    function deleteRequests(ws: FakeWebSocket) {
+      return ws.sent.filter((m) => m.method === 'Server.DeleteClient').map((m) => m.params);
+    }
+
+    it('hides the client and offers undo', async () => {
+      render(<SnapWeb />);
+      const ws = connect();
+      await deleteClient('host-c3');
+
+      expect(screen.getByText('Deleted host-c3')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Settings for host-c3' })).not.toBeInTheDocument();
+      expect(deleteRequests(ws)).toEqual([]);
+    });
+
+    it('restores the client on undo', async () => {
+      render(<SnapWeb />);
+      const ws = connect();
+      await deleteClient('host-c3');
+      await user.click(screen.getByRole('button', { name: 'Undo' }));
+
+      expect(screen.getByRole('button', { name: 'Settings for host-c3' })).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(10000);
+      });
+      expect(deleteRequests(ws)).toEqual([]);
+    });
+
+    it('deletes the client when the notice times out', async () => {
+      render(<SnapWeb />);
+      const ws = connect();
+      await deleteClient('host-c3');
+      act(() => {
+        vi.advanceTimersByTime(5900);
+      });
+      expect(deleteRequests(ws)).toEqual([]);
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(deleteRequests(ws)).toEqual([{ id: 'c3' }]);
+      expect(screen.queryByText('Deleted host-c3')).not.toBeInTheDocument();
+    });
+
+    it('does not delete on Escape, which may be meant for a dialog', async () => {
+      render(<SnapWeb />);
+      const ws = connect();
+      await deleteClient('host-c3');
+      await user.keyboard('{Escape}');
+
+      expect(deleteRequests(ws)).toEqual([]);
+      expect(screen.getByText('Deleted host-c3')).toBeInTheDocument();
+    });
+
+    it('keeps the client hidden and the notice running across a server update', async () => {
+      render(<SnapWeb />);
+      const ws = connect();
+      await deleteClient('host-c3');
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      act(() => ws.receive({ jsonrpc: '2.0', method: 'Server.OnUpdate', params: { server: makeServerStatus() } }));
+
+      expect(screen.queryByRole('button', { name: 'Settings for host-c3' })).not.toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(3100);
+      });
+      expect(deleteRequests(ws)).toEqual([{ id: 'c3' }]);
+    });
+
+    it('shows all notices in one stack', async () => {
+      render(<SnapWeb />);
+      const ws = connect();
+      await deleteClient('host-c3');
+      act(() => ws.drop());
+
+      const stacks = document.querySelectorAll('.notice-stack');
+      expect(stacks).toHaveLength(1);
+      expect(stacks[0]).toHaveTextContent('Deleted host-c3');
+      expect(stacks[0]).toHaveTextContent('Connection lost');
+    });
   });
 
   async function openSettings() {
@@ -315,6 +436,18 @@ describe('SnapWeb', () => {
     expect(snapStream.stop).not.toHaveBeenCalled();
     expect(snapStream.created).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Stop playing' })).toBeInTheDocument();
+  });
+
+  it('can stop playing while the control connection is down', async () => {
+    render(<SnapWeb />);
+    const ws = connect();
+    await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
+    await waitFor(() => expect(snapStream.created).toHaveLength(1));
+    act(() => ws.drop());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stop playing' }));
+    expect(snapStream.stop).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Play on this device' })).not.toBeInTheDocument();
   });
 
   it('stops playing when the server url changes in the settings', async () => {

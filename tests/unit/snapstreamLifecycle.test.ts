@@ -59,7 +59,7 @@ const audio = vi.hoisted(() => {
 });
 vi.mock('standardized-audio-context', () => ({ AudioContext: audio.FakeAudioContext }));
 
-const { SnapStream } = await import('../../src/snapstream');
+const { HelloMessage, SnapStream } = await import('../../src/snapstream');
 
 // A CodecHeader message for 16 bit stereo PCM at the given rate
 function pcmCodecHeader(rate: number): ArrayBuffer {
@@ -107,6 +107,12 @@ describe('SnapStream lifecycle', () => {
   it('connects to the stream endpoint and says hello', () => {
     const { ws } = start();
     expect(ws.url).toBe('ws://snapserver:1780/stream');
+
+    // Message type 5 is Hello
+    expect(new DataView(ws.sent[0]).getUint16(0, true)).toBe(5);
+    const hello = new HelloMessage(ws.sent[0]);
+    expect(hello.clientName).toBe('snapweb');
+    expect(hello.version).toMatch(/^\d+\.\d+/);
   });
 
   it('keeps one playback chain across repeated codec headers', () => {

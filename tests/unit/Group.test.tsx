@@ -1,24 +1,33 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Group from '../../src/components/Group';
 import { connectedControl, quietConsole, requests } from '../helpers/snapControl';
 import { makeServerStatus } from '../fixtures/serverStatus';
 import type { FakeWebSocket } from '../helpers/fakeWebSocket';
-import type { SnapControl } from '../../src/snapcontrol';
+import type { SnapControl, Snapcast } from '../../src/snapcontrol';
 
 describe('Group', () => {
   let control: SnapControl;
   let ws: FakeWebSocket;
+  let onClientDelete: Mock<(client: Snapcast.Client) => void>;
 
   beforeEach(() => {
     quietConsole();
     ({ control, ws } = connectedControl());
+    onClientDelete = vi.fn();
   });
 
-  function renderGroup(id: string, showOffline = false) {
+  function renderGroup(id: string, showOffline = false, deletedClientIds: string[] = []) {
     return render(
-      <Group server={control.server} group={control.getGroup(id)} snapcontrol={control} showOffline={showOffline} />,
+      <Group
+        server={control.server}
+        group={control.getGroup(id)}
+        snapcontrol={control}
+        showOffline={showOffline}
+        deletedClientIds={deletedClientIds}
+        onClientDelete={onClientDelete}
+      />,
     );
   }
 
@@ -177,15 +186,15 @@ describe('Group', () => {
       ({ control, ws } = connectedControl(status));
       renderGroup('g1');
 
-      expect(screen.queryByRole('button', { name: 'play/pause' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^(Play|Pause|Next|Previous)$/ })).not.toBeInTheDocument();
       expect(screen.queryByText('Song')).not.toBeInTheDocument();
     });
 
     it('pause a playing stream and skip tracks', async () => {
       renderGroup('g1');
-      await userEvent.click(screen.getByRole('button', { name: 'play/pause' }));
-      await userEvent.click(screen.getByRole('button', { name: 'next' }));
-      await userEvent.click(screen.getByRole('button', { name: 'previous' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Pause' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Previous' }));
 
       expect(requests(ws, 'Stream.Control').map((m) => m.params)).toEqual([
         { id: 's1', command: 'pause' },
@@ -197,8 +206,9 @@ describe('Group', () => {
     it('play a paused stream', async () => {
       control.getStream('s1').properties.playbackStatus = 'paused';
       renderGroup('g1');
-      expect(screen.getByRole('button', { name: 'play/pause' }).querySelector('.lucide-play')).not.toBeNull();
-      await userEvent.click(screen.getByRole('button', { name: 'play/pause' }));
+      expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Play' }).querySelector('.lucide-play')).not.toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Play' }));
 
       expect(requests(ws, 'Stream.Control')[0].params).toEqual({ id: 's1', command: 'play' });
     });
@@ -264,51 +274,19 @@ describe('Group', () => {
   });
 
   describe('deleting a client', () => {
-    async function deleteOffline() {
+    it('reports a delete from the client settings', async () => {
       renderGroup('g2', true);
       await userEvent.click(screen.getByRole('button', { name: 'Settings for host-c3' }));
       await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
-    }
 
-    it('hides the client and offers undo', async () => {
-      await deleteOffline();
-      expect(screen.getByText('Deleted host-c3')).toBeInTheDocument();
-      expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+      expect(onClientDelete).toHaveBeenCalledWith(control.getClient('c3'));
       expect(requests(ws, 'Server.DeleteClient')).toHaveLength(0);
     });
 
-    it('keeps the client hidden when a server update replaces it', async () => {
-      const { rerender } = renderGroup('g2', true);
-      await userEvent.click(screen.getByRole('button', { name: 'Settings for host-c3' }));
-      await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
-      control.server.fromJson(makeServerStatus());
-      rerender(<Group server={control.server} group={control.getGroup('g2')} snapcontrol={control} showOffline />);
-
-      expect(screen.queryByText('host-c3')).not.toBeInTheDocument();
-      expect(screen.getByText('Deleted host-c3')).toBeInTheDocument();
+    it('hides clients waiting to be deleted', () => {
+      renderGroup('g1', false, ['c1']);
+      expect(screen.queryByText('Kitchen')).not.toBeInTheDocument();
+      expect(screen.getByText('livingroom')).toBeInTheDocument();
     });
-
-    it('restores the client on undo', async () => {
-      await deleteOffline();
-      await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
-
-      expect(screen.getByText('host-c3')).toBeInTheDocument();
-      expect(requests(ws, 'Server.DeleteClient')).toHaveLength(0);
-    });
-
-    it('deletes the client when the snackbar is dismissed with Escape', async () => {
-      await deleteOffline();
-      await userEvent.keyboard('{Escape}');
-
-      expect(requests(ws, 'Server.DeleteClient')).toEqual([expect.objectContaining({ params: { id: 'c3' } })]);
-    });
-
-    it('deletes the client when the snackbar times out', async () => {
-      await deleteOffline();
-      // The undo notice is shown for 6 seconds
-      await act(() => new Promise((resolve) => setTimeout(resolve, 6100)));
-
-      expect(requests(ws, 'Server.DeleteClient')).toEqual([expect.objectContaining({ params: { id: 'c3' } })]);
-    }, 10000);
   });
 });

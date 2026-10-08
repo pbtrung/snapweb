@@ -17,8 +17,10 @@ export default function Client(props: ClientProps) {
   const [, setUpdate] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [name, setName] = useState(client.config.name);
-  // The latency is applied live while editing, and restored on Cancel
-  const [tmpLatency, setTmpLatency] = useState(client.config.latency);
+  // The latency is applied live while editing, and restored on Cancel. The
+  // field keeps what was typed, so it can be cleared or start with "-"
+  // without snapping to 0; only valid numbers are sent.
+  const [latencyText, setLatencyText] = useState(String(client.config.latency));
   const [latency, setLatency] = useState(client.config.latency);
   const displayName = client.getName();
 
@@ -37,7 +39,7 @@ export default function Client(props: ClientProps) {
 
   function handleSettingsClicked() {
     setName(client.config.name);
-    setTmpLatency(client.config.latency);
+    setLatencyText(String(client.config.latency));
     setLatency(client.config.latency);
     setSettingsOpen(true);
   }
@@ -51,18 +53,19 @@ export default function Client(props: ClientProps) {
     setSettingsOpen(false);
     if (apply) {
       props.snapcontrol.setClientName(client.id, name);
-      props.snapcontrol.setClientLatency(client.id, tmpLatency);
-      setLatency(tmpLatency);
+      // The last valid latency was already applied while editing
+      setLatency(client.config.latency);
     } else {
       props.snapcontrol.setClientLatency(client.id, latency);
-      setTmpLatency(latency);
     }
+    setLatencyText(String(apply ? client.config.latency : latency));
     setName(client.config.name);
   }
 
-  function handleLatencyChange(value: number) {
-    setTmpLatency(value);
-    props.snapcontrol.setClientLatency(client.id, value);
+  function handleLatencyChange(text: string) {
+    setLatencyText(text);
+    const value = Number(text);
+    if (text.trim() !== '' && Number.isFinite(value)) props.snapcontrol.setClientLatency(client.id, Math.round(value));
   }
 
   const readOnlyFields: [string, string][] = [
@@ -138,8 +141,8 @@ export default function Client(props: ClientProps) {
             <InputGroup>
               <Form.Control
                 type="number"
-                value={tmpLatency}
-                onChange={(event) => handleLatencyChange(Number(event.target.value) || 0)}
+                value={latencyText}
+                onChange={(event) => handleLatencyChange(event.target.value)}
               />
               <InputGroup.Text>ms</InputGroup.Text>
             </InputGroup>

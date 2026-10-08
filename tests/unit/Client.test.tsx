@@ -33,7 +33,7 @@ describe('Client', () => {
     return screen.getByRole('slider', { name: / volume$/ });
   }
 
-  it('shows the configured name, or the host name', () => {
+  it('shows the configured name', () => {
     renderClient('c1');
     expect(screen.getByText('Kitchen')).toBeInTheDocument();
   });
@@ -150,13 +150,32 @@ describe('Client', () => {
       expect(screen.getByText('Kitchen')).toBeInTheDocument();
     });
 
-    it('treats an invalid latency as 0', async () => {
+    it('lets the latency field be cleared without sending anything', async () => {
       control.getClient('c1').config.latency = 10;
       renderClient('c1');
       const dialog = await openSettings();
-      fireEvent.change(within(dialog).getByLabelText('Latency'), { target: { value: '' } });
+      const field = within(dialog).getByLabelText('Latency');
+      fireEvent.change(field, { target: { value: '' } });
 
-      expect(requests(ws, 'Client.SetLatency').slice(-1)[0].params).toEqual({ id: 'c1', latency: 0 });
+      expect(field).toHaveValue(null);
+      expect(requests(ws, 'Client.SetLatency')).toHaveLength(0);
+
+      fireEvent.change(field, { target: { value: '-20' } });
+      expect(requests(ws, 'Client.SetLatency').slice(-1)[0].params).toEqual({ id: 'c1', latency: -20 });
+    });
+
+    it('keeps the last valid latency on OK', async () => {
+      control.getClient('c1').config.latency = 10;
+      renderClient('c1');
+      const dialog = await openSettings();
+      const field = within(dialog).getByLabelText('Latency');
+      fireEvent.change(field, { target: { value: '30' } });
+      fireEvent.change(field, { target: { value: '' } });
+      await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
+
+      expect(control.getClient('c1').config.latency).toBe(30);
+      await openSettings();
+      expect(within(screen.getByRole('dialog')).getByLabelText('Latency')).toHaveValue(30);
     });
   });
 });
