@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Button, Col, Form, InputGroup, Modal, Row } from 'react-bootstrap';
-import { EllipsisVertical, Trash2 } from 'lucide-react';
+import { Button, Form, InputGroup } from 'react-bootstrap';
+import { EllipsisVertical, Speaker, Trash2 } from 'lucide-react';
 import { SnapControl, Snapcast } from '../snapcontrol';
+import Dialog, { DialogSection } from './Dialog';
 import VolumeControl from './VolumeControl';
 
 type ClientProps = {
@@ -75,10 +76,10 @@ export default function Client(props: ClientProps) {
   const idPrefix = 'client-' + client.id;
 
   return (
-    <li className="list-group-item px-3 py-2" style={{ opacity: client.connected ? 1.0 : 0.5 }}>
+    <li className="list-group-item client-row" style={{ opacity: client.connected ? 1.0 : 0.5 }}>
       <div className="d-flex align-items-center gap-2">
         <div className="flex-grow-1" style={{ minWidth: 0 }}>
-          <div className="d-flex align-items-center gap-2 ps-1">
+          <div className="d-flex align-items-center gap-2 client-heading">
             <span className="client-name text-truncate">{displayName}</span>
             {!client.connected && (
               <span className="badge rounded-pill text-bg-secondary fw-normal flex-shrink-0">offline</span>
@@ -101,18 +102,26 @@ export default function Client(props: ClientProps) {
           <EllipsisVertical size={20} />
         </button>
       </div>
-      <Modal
+      <Dialog
         show={settingsOpen}
-        onHide={() => handleSettingsClose(false)}
-        centered
-        aria-labelledby={idPrefix + '-title'}
+        id={idPrefix}
+        title="Client settings"
+        icon={Speaker}
+        onClose={handleSettingsClose}
+        footerStart={
+          !client.connected && (
+            <Button
+              variant="outline-danger"
+              className="d-inline-flex align-items-center gap-2"
+              onClick={handleDeleteClicked}
+            >
+              <Trash2 size={16} aria-hidden="true" />
+              Delete
+            </Button>
+          )
+        }
       >
-        <Modal.Header closeButton>
-          <Modal.Title id={idPrefix + '-title'} as="h5">
-            Client settings
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
+        <DialogSection title="General">
           <Form.Group className="mb-3" controlId={idPrefix + '-name'}>
             <Form.Label>Name</Form.Label>
             <Form.Control
@@ -124,7 +133,7 @@ export default function Client(props: ClientProps) {
               onChange={(event) => setName(event.target.value)}
             />
           </Form.Group>
-          <Form.Group className="mb-3" controlId={idPrefix + '-latency'}>
+          <Form.Group controlId={idPrefix + '-latency'}>
             <Form.Label>Latency</Form.Label>
             <InputGroup>
               <Form.Control
@@ -135,38 +144,18 @@ export default function Client(props: ClientProps) {
               <InputGroup.Text>ms</InputGroup.Text>
             </InputGroup>
           </Form.Group>
-          <div className="border-top pt-2">
+        </DialogSection>
+        <DialogSection title="Details">
+          <div className="info-list">
             {readOnlyFields.map(([label, value]) => (
-              <Form.Group as={Row} key={label} className="g-2" controlId={idPrefix + '-' + label}>
-                <Form.Label column xs={3} className="text-body-secondary small">
-                  {label}
-                </Form.Label>
-                <Col xs={9}>
-                  <Form.Control plaintext readOnly className="small font-monospace" value={value} />
-                </Col>
+              <Form.Group key={label} className="info-row" controlId={idPrefix + '-' + label}>
+                <Form.Label>{label}</Form.Label>
+                <Form.Control plaintext readOnly value={value} />
               </Form.Group>
             ))}
           </div>
-        </Modal.Body>
-        <Modal.Footer>
-          {!client.connected && (
-            <Button
-              variant="outline-danger"
-              className="me-auto d-inline-flex align-items-center gap-2"
-              onClick={handleDeleteClicked}
-            >
-              <Trash2 size={16} aria-hidden="true" />
-              Delete
-            </Button>
-          )}
-          <Button variant="outline-secondary" onClick={() => handleSettingsClose(false)}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={() => handleSettingsClose(true)}>
-            OK
-          </Button>
-        </Modal.Footer>
-      </Modal>
+        </DialogSection>
+      </Dialog>
     </li>
   );
 }

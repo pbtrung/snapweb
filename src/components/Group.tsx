@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { Alert, Button, Form } from 'react-bootstrap';
 import { Clock, FolderOpen, Pause, Play, Settings2, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
+import Dialog, { DialogSection } from './Dialog';
 import VolumeControl from './VolumeControl';
 import { SnapControl, Snapcast } from '../snapcontrol';
 
@@ -196,7 +197,7 @@ export default function Group(props: GroupProps) {
 
   return (
     <section className="card group-card">
-      <div className="card-body p-3">
+      <div className="card-body">
         <div className="d-flex align-items-center gap-2">
           <Form.Select
             size="sm"
@@ -251,7 +252,7 @@ export default function Group(props: GroupProps) {
         </div>
 
         {metadata && (
-          <div className="now-playing d-flex flex-column flex-sm-row align-items-center gap-3 p-2 mt-3">
+          <div className="now-playing d-flex flex-column flex-sm-row align-items-center gap-3 mt-3">
             {metadata.artUrl && metadata.artUrl !== brokenArtUrl && (
               <img
                 className="cover-art"
@@ -290,12 +291,7 @@ export default function Group(props: GroupProps) {
 
         {clients.length > 1 && (
           <div className="mt-3">
-            <div
-              className="small text-body-secondary text-uppercase fw-semibold ps-1"
-              style={{ letterSpacing: '.04em' }}
-            >
-              Group volume
-            </div>
+            <div className="section-label mb-0 ps-1">Group volume</div>
             <VolumeControl
               label={groupName}
               volume={getVolume()}
@@ -322,20 +318,10 @@ export default function Group(props: GroupProps) {
         ))}
       </ul>
 
-      <Modal
-        show={settingsOpen}
-        onHide={() => handleSettingsClose(false)}
-        centered
-        aria-labelledby={idPrefix + '-title'}
-      >
-        <Modal.Header closeButton>
-          <Modal.Title id={idPrefix + '-title'} as="h5">
-            Group settings
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form.Group className="mb-4" controlId={idPrefix + '-stream'}>
-            <Form.Label className="fw-semibold">Stream</Form.Label>
+      <Dialog show={settingsOpen} id={idPrefix} title="Group settings" icon={Settings2} onClose={handleSettingsClose}>
+        <DialogSection title="Stream">
+          <Form.Group controlId={idPrefix + '-stream'}>
+            <Form.Label visuallyHidden>Stream</Form.Label>
             <Form.Select value={settingsStreamId} onChange={(event) => setSettingsStreamId(event.target.value)}>
               {props.server.streams.map((stream) => (
                 <option key={stream.id} value={stream.id}>
@@ -344,32 +330,29 @@ export default function Group(props: GroupProps) {
               ))}
             </Form.Select>
           </Form.Group>
-          <fieldset>
-            <legend className="form-label fs-6 fw-semibold">Clients</legend>
-            <div className="list-group">
-              {settingsClients.map((element) => (
-                <label key={element.client.id} className="list-group-item d-flex align-items-center gap-2">
-                  <input
-                    className="form-check-input m-0"
-                    type="checkbox"
-                    checked={element.inGroup}
-                    onChange={(event) => handleGroupClientChange(element.client, event.target.checked)}
-                  />
-                  {element.client.getName()}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="outline-secondary" onClick={() => handleSettingsClose(false)}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={() => handleSettingsClose(true)}>
-            OK
-          </Button>
-        </Modal.Footer>
-      </Modal>
+        </DialogSection>
+        <DialogSection title="Clients">
+          <div className="list-group check-list">
+            {settingsClients.map((element) => (
+              <label key={element.client.id} className="list-group-item d-flex align-items-center gap-3">
+                <input
+                  className="form-check-input m-0 flex-shrink-0"
+                  type="checkbox"
+                  checked={element.inGroup}
+                  onChange={(event) => handleGroupClientChange(element.client, event.target.checked)}
+                />
+                <span className="text-truncate">{element.client.getName()}</span>
+                {!element.client.connected && (
+                  // Hidden from the checkbox's name, which is the client name
+                  <span className="badge rounded-pill text-bg-secondary fw-normal ms-auto" aria-hidden="true">
+                    offline
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+        </DialogSection>
+      </Dialog>
       {undoDeleteNotices}
     </section>
   );

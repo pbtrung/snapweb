@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Button, Form, Modal, ToggleButton, ToggleButtonGroup } from 'react-bootstrap';
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { Form, ToggleButton, ToggleButtonGroup } from 'react-bootstrap';
+import { Monitor, Moon, Settings, Sun } from 'lucide-react';
+import Dialog, { DialogSection } from './Dialog';
 import { config, Theme } from '../config';
 
 const themes = [
@@ -24,15 +25,21 @@ export default function SettingsDialog(props: { open: boolean; onClose: (_apply:
   }
 
   return (
-    <Modal show={props.open} onHide={() => handleClose(false)} centered aria-labelledby="settings-title">
-      <Modal.Header closeButton>
-        <Modal.Title id="settings-title" as="h5">
-          Settings
-        </Modal.Title>
-      </Modal.Header>
-      <Modal.Body>
-        <Form.Group className="mb-4" controlId="settings-host">
-          <Form.Label className="fw-semibold">Snapserver host</Form.Label>
+    <Dialog
+      show={props.open}
+      id="settings"
+      title="Settings"
+      icon={Settings}
+      onClose={handleClose}
+      footerStart={
+        <small className="text-body-secondary">
+          {import.meta.env.VITE_APP_NAME} {import.meta.env.VITE_APP_VERSION}
+        </small>
+      }
+    >
+      <DialogSection title="Connection">
+        <Form.Group controlId="settings-host">
+          <Form.Label>Snapserver host</Form.Label>
           <Form.Control
             autoFocus
             type="text"
@@ -42,14 +49,16 @@ export default function SettingsDialog(props: { open: boolean; onClose: (_apply:
             onChange={(event) => setServerurl(event.target.value)}
           />
         </Form.Group>
-        <Form.Group className="mb-4">
-          <Form.Label as="div" id="settings-theme" className="fw-semibold">
+      </DialogSection>
+      <DialogSection title="Appearance">
+        <Form.Group className="mb-3">
+          <Form.Label as="div" id="settings-theme">
             Theme
           </Form.Label>
           <ToggleButtonGroup
             type="radio"
             name="theme"
-            className="w-100"
+            className="segmented w-100"
             aria-labelledby="settings-theme"
             value={theme}
             onChange={(value: Theme) => setTheme(value)}
@@ -75,20 +84,7 @@ export default function SettingsDialog(props: { open: boolean; onClose: (_apply:
           checked={showOffline}
           onChange={(event) => setShowOffline(event.target.checked)}
         />
-      </Modal.Body>
-      <Modal.Footer className="justify-content-between">
-        <small className="text-body-secondary">
-          {import.meta.env.VITE_APP_NAME} {import.meta.env.VITE_APP_VERSION}
-        </small>
-        <div className="d-flex gap-2">
-          <Button variant="outline-secondary" onClick={() => handleClose(false)}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={() => handleClose(true)}>
-            OK
-          </Button>
-        </div>
-      </Modal.Footer>
-    </Modal>
+      </DialogSection>
+    </Dialog>
   );
 }

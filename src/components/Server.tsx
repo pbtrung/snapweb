@@ -12,7 +12,7 @@ export default function Server(props: ServerProps) {
   const groups = props.server.groups;
   const hasClients = groups.some((group) => group.clients.some((client) => client.connected || props.showOffline));
   return (
-    <main className="app-main container-fluid d-flex flex-column gap-3 py-3 px-3">
+    <main className="app-main app-content container-fluid d-flex flex-column">
       {groups.map((group) => (
         <Group
           group={group}

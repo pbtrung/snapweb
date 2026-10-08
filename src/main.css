@@ -38,6 +38,19 @@
   --sw-header-bg: rgba(15, 17, 23, 0.8);
 }
 
+:root {
+  /* Inner padding of cards and dialogs, and the gap between cards */
+  --sw-space: 1.25rem;
+  --sw-radius-lg: 1rem;
+  --sw-radius-sm: 0.75rem;
+}
+
+@media (max-width: 575.98px) {
+  :root {
+    --sw-space: 1rem;
+  }
+}
+
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -89,10 +102,163 @@ body {
   --bs-dropdown-link-active-bg: var(--bs-primary);
 }
 
+/* Dialogs: one padding for the header, body and footer, and sections
+   separated by a hairline */
+
 .modal {
   --bs-modal-bg: var(--sw-surface);
-  --bs-modal-border-radius: 1rem;
-  --bs-modal-inner-border-radius: calc(1rem - 1px);
+  --bs-modal-border-color: var(--bs-border-color-translucent);
+  --bs-modal-border-radius: var(--sw-radius-lg);
+  --bs-modal-inner-border-radius: calc(var(--sw-radius-lg) - 1px);
+  --bs-modal-padding: var(--sw-space);
+  --bs-modal-header-padding: var(--sw-space);
+  --bs-modal-footer-gap: 0.5rem;
+  --bs-modal-box-shadow: 0 24px 48px rgba(16, 24, 40, 0.18);
+}
+
+.modal-backdrop {
+  --bs-backdrop-opacity: 0.4;
+  backdrop-filter: blur(2px);
+}
+
+.sw-dialog .modal-content {
+  box-shadow: var(--bs-modal-box-shadow);
+}
+
+.sw-dialog .modal-header {
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+  border-bottom: 0;
+}
+
+.sw-dialog .modal-title {
+  font-weight: 600;
+}
+
+.sw-dialog .modal-body {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.sw-dialog .modal-footer {
+  padding: var(--sw-space);
+  padding-top: 1rem;
+  border-top: 0;
+}
+
+.sw-dialog .modal-footer > * {
+  margin: 0;
+}
+
+.sw-dialog .modal-footer .btn {
+  min-width: 5.5rem;
+}
+
+.sw-dialog .form-label {
+  font-weight: 500;
+  margin-bottom: 0.375rem;
+}
+
+.dialog-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--sw-radius-sm);
+  color: var(--bs-primary-text-emphasis);
+  background-color: var(--bs-primary-bg-subtle);
+}
+
+.dialog-section {
+  margin: 0;
+  padding: 1rem 0;
+  min-width: 0;
+  border-top: 1px solid var(--bs-border-color-translucent);
+}
+
+.dialog-section:first-child {
+  padding-top: 0.25rem;
+  border-top: 0;
+}
+
+/* Small uppercase heading for a group of controls */
+.section-label {
+  margin-bottom: 0.75rem;
+  padding: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color);
+}
+
+/* Floated like Bootstrap's legend, so the fieldset's padding and border
+   stay above it instead of around it */
+legend.section-label {
+  float: left;
+  width: 100%;
+  line-height: inherit;
+}
+
+legend.section-label + * {
+  clear: left;
+}
+
+/* Segmented control: equal width options */
+.segmented > .btn {
+  flex: 1 1 0;
+}
+
+/* Checkbox rows in a dialog */
+.check-list {
+  --bs-list-group-bg: transparent;
+  --bs-list-group-border-radius: var(--sw-radius-sm);
+  --bs-list-group-item-padding-y: 0.625rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.check-list .list-group-item {
+  cursor: pointer;
+}
+
+.check-list .list-group-item:hover {
+  background-color: var(--bs-tertiary-bg);
+}
+
+/* Read-only label and value pairs */
+.info-list {
+  padding: 0.25rem 0.875rem;
+  border-radius: var(--sw-radius-sm);
+  background-color: var(--bs-tertiary-bg);
+}
+
+.info-row {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  align-items: baseline;
+  column-gap: 0.75rem;
+}
+
+.info-row + .info-row {
+  border-top: 1px solid var(--bs-border-color-translucent);
+}
+
+.sw-dialog .info-row .form-label {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--bs-secondary-color);
+}
+
+.info-row .form-control-plaintext {
+  padding: 0.5rem 0;
+  font-family: var(--bs-font-monospace);
+  font-size: 0.8125rem;
+  color: var(--bs-body-color);
+  text-overflow: ellipsis;
 }
 
 /* Layout */
@@ -110,13 +276,12 @@ body {
 
 .app-main {
   max-width: 760px;
+  padding-inline: var(--sw-space);
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
+.app-content {
+  gap: var(--sw-space);
+  padding-block: var(--sw-space);
 }
 
 /* Buttons with only an icon */
@@ -168,8 +333,10 @@ body {
 .group-card {
   --bs-card-bg: var(--sw-surface);
   --bs-card-border-color: var(--bs-border-color-translucent);
-  --bs-card-border-radius: 1rem;
-  --bs-card-inner-border-radius: calc(1rem - 1px);
+  --bs-card-border-radius: var(--sw-radius-lg);
+  --bs-card-inner-border-radius: calc(var(--sw-radius-lg) - 1px);
+  --bs-card-spacer-x: var(--sw-space);
+  --bs-card-spacer-y: var(--sw-space);
   box-shadow:
     0 1px 2px rgba(16, 24, 40, 0.04),
     0 4px 16px rgba(16, 24, 40, 0.04);
@@ -180,6 +347,16 @@ body {
   --bs-list-group-bg: transparent;
 }
 
+/* Client rows line up with the card body, so their sliders line up with
+   the group volume slider */
+.client-row {
+  padding: 0.625rem var(--sw-space);
+}
+
+.client-heading {
+  padding-left: 0.25rem;
+}
+
 .stream-select {
   max-width: 14rem;
   border-radius: 999px;
@@ -187,17 +364,18 @@ body {
 }
 
 .cover-art {
-  width: 100px;
-  height: 100px;
+  width: 96px;
+  height: 96px;
   object-fit: cover;
-  border-radius: 0.75rem;
+  border-radius: calc(var(--sw-radius-sm) - 0.25rem);
   flex-shrink: 0;
   background-color: var(--bs-tertiary-bg);
 }
 
 .now-playing {
+  padding: 0.75rem;
   background-color: var(--bs-tertiary-bg);
-  border-radius: 0.875rem;
+  border-radius: var(--sw-radius-sm);
 }
 
 .track-meta {

@@ -13,6 +13,11 @@
 - Hide the cover when the stream has none or it fails to load, and stack it
   above the track details on small screens
 - Show a message when no clients are online
+- Dialogs share one layout: an icon and title, titled sections split by
+  hairlines, the same padding throughout and Cancel/OK aligned at the end;
+  the client details are shown as a compact list and offline clients are
+  marked in the group dialog
+- Cards and the page use the same spacing, which is tighter on small screens
 
 ### General
 

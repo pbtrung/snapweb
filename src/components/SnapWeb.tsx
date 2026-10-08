@@ -149,7 +149,7 @@ export default function SnapWeb() {
   return (
     <>
       <header className="app-header sticky-top border-bottom">
-        <nav className="app-main container-fluid d-flex align-items-center gap-2 px-3 py-2">
+        <nav className="app-main container-fluid d-flex align-items-center gap-2 py-2">
           <img src={logo} alt="" className="app-logo" />
           <span className="fs-5 fw-semibold me-auto">Snapcast</span>
           <div className="btn-group header-actions" role="group" aria-label="Actions">

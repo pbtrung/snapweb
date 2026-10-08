@@ -1,0 +1,62 @@
+import type { ReactNode } from 'react';
+import { Button, Modal } from 'react-bootstrap';
+import type { LucideIcon } from 'lucide-react';
+
+type DialogProps = {
+  show: boolean;
+  id: string;
+  title: string;
+  icon: LucideIcon;
+  // Called with true for OK and false for Cancel, Escape or the close button
+  onClose: (apply: boolean) => void;
+  // Shown at the start of the footer, before Cancel and OK
+  footerStart?: ReactNode;
+  children: ReactNode;
+};
+
+// A modal with a title, a body of dialog sections and Cancel/OK, so all
+// dialogs share the same layout and spacing
+export default function Dialog(props: DialogProps) {
+  const Icon = props.icon;
+  return (
+    <Modal
+      show={props.show}
+      onHide={() => props.onClose(false)}
+      centered
+      scrollable
+      className="sw-dialog"
+      aria-labelledby={props.id + '-title'}
+    >
+      <Modal.Header closeButton>
+        <span className="dialog-icon" aria-hidden="true">
+          <Icon size={18} />
+        </span>
+        <Modal.Title id={props.id + '-title'} as="h5">
+          {props.title}
+        </Modal.Title>
+      </Modal.Header>
+      <Modal.Body>{props.children}</Modal.Body>
+      <Modal.Footer>
+        {props.footerStart}
+        <div className="d-flex gap-2 ms-auto">
+          <Button variant="outline-secondary" onClick={() => props.onClose(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => props.onClose(true)}>
+            OK
+          </Button>
+        </div>
+      </Modal.Footer>
+    </Modal>
+  );
+}
+
+// A titled group of fields in a dialog
+export function DialogSection(props: { title: string; children: ReactNode }) {
+  return (
+    <fieldset className="dialog-section">
+      <legend className="section-label">{props.title}</legend>
+      {props.children}
+    </fieldset>
+  );
+}
