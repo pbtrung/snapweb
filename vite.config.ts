@@ -1,13 +1,24 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { readFileSync } from 'node:fs';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+  name: string;
+  version: string;
+};
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  // index.html lives in src/; public/, .env and dist/ stay at the top level
+  // index.html lives in src/; public/, .env.local and dist/ stay at the top level
   root: 'src',
   publicDir: '../public',
   envDir: '..',
+  define: {
+    // Shown in the Settings dialog and sent to Snapserver in the Hello message
+    'import.meta.env.VITE_APP_NAME': JSON.stringify(pkg.name),
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
+  },
   server: {
     host: '127.0.0.1',
   },
