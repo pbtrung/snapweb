@@ -396,7 +396,7 @@ body {
   --bs-dropdown-border-color: var(--bs-border-color-translucent);
   --bs-dropdown-border-radius: 0.625rem;
   --bs-dropdown-font-size: 0.875rem;
-  --bs-dropdown-min-width: 7rem;
+  --bs-dropdown-min-width: 0;
   --bs-dropdown-padding-x: 0.25rem;
   --bs-dropdown-padding-y: 0.25rem;
   --bs-dropdown-spacer: 0.25rem;
@@ -407,7 +407,8 @@ body {
   --bs-dropdown-link-active-bg: var(--bs-primary-bg-subtle);
   --bs-dropdown-link-active-color: var(--bs-primary-text-emphasis);
   --bs-dropdown-box-shadow: 0 8px 24px rgba(16, 24, 40, 0.14);
-  max-width: min(16rem, calc(100vw - 2rem));
+  /* As wide as the pill, which the dropdown wraps */
+  width: 100%;
   max-height: 60vh;
   overflow-y: auto;
   box-shadow: var(--bs-dropdown-box-shadow);
