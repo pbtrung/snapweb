@@ -49,11 +49,14 @@
   --sw-space: 1.25rem;
   --sw-radius-lg: 1rem;
   --sw-radius-sm: 0.75rem;
+  /* Left and right padding inside group cards */
+  --sw-card-x: 0.875rem;
 }
 
 @media (max-width: 575.98px) {
   :root {
     --sw-space: 1rem;
+    --sw-card-x: 0.625rem;
   }
 }
 
@@ -231,48 +234,6 @@ body {
   border-radius: 0.5rem;
 }
 
-/* Play on this device: a pill with a label on wider screens */
-.btn-listen {
-  --bs-btn-padding-x: 0.875rem;
-  --bs-btn-padding-y: 0;
-  --bs-btn-font-size: 0.875rem;
-  --bs-btn-font-weight: 600;
-  --bs-btn-border-radius: 999px;
-  height: 2.25rem;
-  min-width: 2.25rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-}
-
-@media (max-width: 575.98px) {
-  .btn-listen {
-    --bs-btn-padding-x: 0;
-    width: 2.25rem;
-  }
-}
-
-.btn-listen.playing {
-  animation: listen-pulse 2s ease-out infinite;
-}
-
-@keyframes listen-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(var(--bs-primary-rgb), 0.45);
-  }
-  70%,
-  100% {
-    box-shadow: 0 0 0 0.625rem rgba(var(--bs-primary-rgb), 0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .btn-listen.playing {
-    animation: none;
-  }
-}
-
 .app-main {
   max-width: 760px;
   padding-inline: var(--sw-space);
@@ -314,6 +275,13 @@ body {
   --bs-btn-active-color: var(--bs-danger);
 }
 
+/* Pill shaped group of icon buttons */
+.header-actions > .btn-icon {
+  --bs-btn-border-radius: 50rem;
+  width: 2.75rem;
+  border-radius: var(--bs-btn-border-radius);
+}
+
 /* Group cards */
 
 .group-card {
@@ -321,7 +289,7 @@ body {
   --bs-card-border-color: var(--bs-border-color-translucent);
   --bs-card-border-radius: var(--sw-radius-lg);
   --bs-card-inner-border-radius: calc(var(--sw-radius-lg) - 1px);
-  --bs-card-spacer-x: var(--sw-space);
+  --bs-card-spacer-x: var(--sw-card-x);
   --bs-card-spacer-y: var(--sw-space);
   box-shadow:
     0 1px 2px rgba(16, 24, 40, 0.04),
@@ -366,7 +334,7 @@ body {
 /* Client rows line up with the card body, so their sliders line up with
    the group volume slider */
 .client-row {
-  padding: 0.75rem var(--sw-space) 0.5rem;
+  padding: 0.75rem var(--sw-card-x) 0.5rem;
 }
 
 .client-row.offline {
@@ -397,56 +365,52 @@ body {
   opacity: 1;
 }
 
-.stream-select {
-  width: auto;
-  max-width: 45%;
-  border-radius: 999px;
-  font-weight: 500;
-}
-
-.cover-art {
-  width: 112px;
-  height: 112px;
-  object-fit: cover;
-  border-radius: var(--sw-radius-sm);
-  flex-shrink: 0;
-  background-color: var(--sw-track);
-  box-shadow: 0 6px 20px rgba(16, 24, 40, 0.2);
-}
-
-.cover-art-empty {
+/* Stream picker: a borderless tinted pill with an icon and a small chevron */
+.stream-picker {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  color: var(--bs-secondary-color);
-  box-shadow: none;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 50%;
+  color: var(--bs-primary-text-emphasis);
 }
 
-/* The cover art, blurred, behind the track details */
-.now-playing {
-  position: relative;
-  overflow: hidden;
-  padding: 1rem;
-  border-radius: var(--sw-radius-sm);
-  background: linear-gradient(135deg, rgba(var(--bs-primary-rgb), 0.1), rgba(var(--bs-primary-rgb), 0.03));
-}
-
-.now-playing-backdrop {
+.stream-picker > svg {
   position: absolute;
-  inset: -2rem;
-  background-size: cover;
-  background-position: center;
-  filter: blur(32px) saturate(140%);
-  opacity: 0.35;
+  left: 0.75rem;
   pointer-events: none;
 }
 
-[data-bs-theme='dark'] .now-playing-backdrop {
-  opacity: 0.3;
+.stream-picker .form-select {
+  min-width: 0;
+  height: 2rem;
+  padding: 0 2rem 0 2.125rem;
+  border: 0;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  color: inherit;
+  background-color: rgba(var(--bs-primary-rgb), 0.1);
+  background-size: 12px 10px;
+  background-position: right 0.75rem center;
+  cursor: pointer;
+  transition: background-color 0.15s ease-in-out;
 }
 
-.now-playing-content {
-  position: relative;
+.stream-picker .form-select:hover {
+  background-color: rgba(var(--bs-primary-rgb), 0.16);
+}
+
+.stream-picker .form-select:focus {
+  box-shadow: 0 0 0 0.25rem var(--bs-focus-ring-color);
+}
+
+.now-playing {
+  padding: 0.875rem;
+  border-radius: var(--sw-radius-sm);
+  background: linear-gradient(135deg, rgba(var(--bs-primary-rgb), 0.1), rgba(var(--bs-primary-rgb), 0.03));
 }
 
 .track-title {
@@ -570,21 +534,6 @@ body {
 
 .volume-range.muted {
   --bs-primary: var(--bs-secondary-color);
-}
-
-.volume-value {
-  width: 2rem;
-  flex-shrink: 0;
-  text-align: right;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  color: var(--bs-secondary-color);
-}
-
-.volume-value.muted {
-  text-decoration: line-through;
-  opacity: 0.6;
 }
 
 /* Shown when no client is listed */

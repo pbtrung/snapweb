@@ -40,10 +40,6 @@ export default function VolumeControl(props: VolumeControlProps) {
         onKeyUp={props.onChangeEnd}
         onBlur={props.onChangeEnd}
       />
-      {/* The slider already reports its value */}
-      <span className={'volume-value' + (props.muted ? ' muted' : '')} aria-hidden="true">
-        {volume}
-      </span>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Form } from 'react-bootstrap';
-import { AudioLines, Clock, FolderOpen, Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
+import { AudioLines, Clock, FolderOpen, Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
 import VolumeControl from './VolumeControl';
 import { SnapControl, Snapcast } from '../snapcontrol';
@@ -40,8 +40,6 @@ function formatDuration(seconds: number): string {
 
 export default function Group(props: GroupProps) {
   const [, setUpdate] = useState(0);
-  // Cover art that failed to load, which is hidden like a missing one
-  const [brokenArtUrl, setBrokenArtUrl] = useState('');
   const volumeDrag = useRef<VolumeDrag | null>(null);
 
   // The model is updated in place, so re-render to show the new values
@@ -130,7 +128,6 @@ export default function Group(props: GroupProps) {
       </button>
     </div>
   );
-  const artUrl = metadata?.artUrl && metadata.artUrl !== brokenArtUrl ? metadata.artUrl : undefined;
 
   return (
     <section className="card group-card" aria-label={props.group.name || undefined}>
@@ -146,38 +143,25 @@ export default function Group(props: GroupProps) {
               {stream && (isActive ? ' · Playing' : ' · Idle')}
             </div>
           </div>
-          <Form.Select
-            size="sm"
-            className="stream-select"
-            aria-label="Active stream"
-            value={props.group.stream_id}
-            onChange={(event) => props.snapcontrol.setStream(props.group.id, event.target.value)}
-          >
-            {props.server.streams.map((stream) => (
-              <option key={stream.id} value={stream.id}>
-                {stream.id}
-              </option>
-            ))}
-          </Form.Select>
+          <div className="stream-picker">
+            <Radio size={14} aria-hidden="true" />
+            <Form.Select
+              aria-label="Active stream"
+              value={props.group.stream_id}
+              onChange={(event) => props.snapcontrol.setStream(props.group.id, event.target.value)}
+            >
+              {props.server.streams.map((stream) => (
+                <option key={stream.id} value={stream.id}>
+                  {stream.id}
+                </option>
+              ))}
+            </Form.Select>
+          </div>
         </div>
 
         {metadata ? (
           <div className="now-playing mt-3">
-            {artUrl && <div className="now-playing-backdrop" style={{ backgroundImage: `url("${artUrl}")` }} />}
-            <div className="now-playing-content d-flex flex-column flex-sm-row align-items-center gap-3">
-              {artUrl ? (
-                <img
-                  className="cover-art"
-                  src={artUrl}
-                  alt={title + ' cover'}
-                  // Unreachable cover art, e.g. a URL only the server can resolve
-                  onError={() => setBrokenArtUrl(artUrl)}
-                />
-              ) : (
-                <span className="cover-art cover-art-empty" aria-hidden="true">
-                  <Music size={36} strokeWidth={1.5} />
-                </span>
-              )}
+            <div className="d-flex flex-column flex-sm-row align-items-center gap-3">
               <div className="flex-grow-1 overflow-hidden align-self-stretch align-self-sm-auto text-center text-sm-start">
                 <div className="track-title text-truncate">{title}</div>
                 <div className="text-body-secondary text-truncate">{artist}</div>
@@ -201,10 +185,8 @@ export default function Group(props: GroupProps) {
                     )}
                   </dl>
                 )}
-                {controls && (
-                  <div className="mt-2 d-flex justify-content-center justify-content-sm-start">{controls}</div>
-                )}
               </div>
+              {controls}
             </div>
           </div>
         ) : (

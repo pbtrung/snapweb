@@ -148,23 +148,10 @@ describe('Group', () => {
     renderGroup('g1');
     expect(screen.getByText('Song')).toBeInTheDocument();
     expect(screen.getByText('Artist A, Artist B')).toBeInTheDocument();
-    expect(screen.getByAltText('Song cover')).toHaveAttribute('src', 'http://example.com/art.png');
+    expect(screen.queryByRole('img', { name: /cover/ })).not.toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Duration' })).toBeInTheDocument();
     expect(screen.getByText('3:00')).toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'Path' })).not.toBeInTheDocument();
-  });
-
-  it('hides the cover when the stream has none', () => {
-    delete control.getStream('s1').properties.metadata!.artUrl;
-    renderGroup('g1');
-    expect(screen.getByText('Song')).toBeInTheDocument();
-    expect(screen.queryByAltText('Song cover')).not.toBeInTheDocument();
-  });
-
-  it('hides a cover that fails to load', () => {
-    renderGroup('g1');
-    fireEvent.error(screen.getByAltText('Song cover'));
-    expect(screen.queryByAltText('Song cover')).not.toBeInTheDocument();
   });
 
   it('switches the stream from the selector', async () => {

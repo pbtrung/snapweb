@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { Alert, Button, Spinner } from 'react-bootstrap';
-import { Headphones, Settings, Square } from 'lucide-react';
+import { Play, Settings, Square } from 'lucide-react';
 import Server from './Server';
 import SettingsDialog from './Settings';
 import LoginDialog from './Login';
@@ -211,30 +211,27 @@ export default function SnapWeb() {
           <img src={logo} alt="" className="app-logo" />
           <span className="app-title">Snapcast</span>
           <small className="app-version me-auto">v{import.meta.env.VITE_APP_VERSION}</small>
-          <div className="header-actions d-flex align-items-center gap-2" role="group" aria-label="Actions">
+          <div className="btn-group header-actions" role="group" aria-label="Actions">
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-icon"
+              aria-label="Open settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={18} />
+            </button>
             {/* Playback carries on without the control connection, so it can always be stopped */}
             {(isConnected || isPlaying) && (
               <button
                 type="button"
-                className={'btn btn-listen ' + (isPlaying ? 'btn-primary playing' : 'btn-outline-primary')}
+                className={'btn btn-icon ' + (isPlaying ? 'btn-primary' : 'btn-outline-primary')}
                 aria-label={isPlaying ? 'Stop playing' : 'Play on this device'}
                 aria-pressed={isPlaying}
                 onClick={() => setIsPlaying(!isPlaying)}
               >
-                {isPlaying ? <Square size={14} fill="currentColor" /> : <Headphones size={16} />}
-                <span className="d-none d-sm-inline" aria-hidden="true">
-                  {isPlaying ? 'Listening' : 'Listen here'}
-                </span>
+                {isPlaying ? <Square size={16} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
               </button>
             )}
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon"
-              aria-label="Open settings"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings size={20} />
-            </button>
           </div>
         </nav>
       </header>
