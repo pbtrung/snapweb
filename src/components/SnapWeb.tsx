@@ -161,8 +161,13 @@ export default function SnapWeb() {
     setDeletedClients((clients) => clients.filter(({ id }) => id !== clientId));
   }
 
+  // The connection and login notices are hidden while the settings are
+  // open, where they would cover the dialog's buttons
+  const showConnectionAlert = !isConnected && !settingsOpen;
+  const showLoginAlert = isConnected && authRequired && !loginOpen && !settingsOpen;
+
   function connectionAlert() {
-    if (isConnected) return null;
+    if (!showConnectionAlert) return null;
     return (
       <Alert variant={connectError ? 'danger' : 'light'} className="d-flex align-items-center gap-3 py-2 pe-2">
         {!connectError && <Spinner animation="border" size="sm" className="flex-shrink-0" aria-hidden="true" />}
@@ -183,7 +188,7 @@ export default function SnapWeb() {
   }
 
   function loginAlert() {
-    if (!isConnected || !authRequired || loginOpen) return null;
+    if (!showLoginAlert) return null;
     return (
       <Alert variant="danger" className="d-flex align-items-center gap-3 py-2 pe-2">
         <div className="flex-grow-1 fw-semibold">Login required</div>
@@ -204,7 +209,8 @@ export default function SnapWeb() {
       <header className="app-header sticky-top border-bottom">
         <nav className="app-main container-fluid d-flex align-items-center gap-2 py-2">
           <img src={logo} alt="" className="app-logo" />
-          <span className="fs-5 fw-semibold me-auto">Snapcast</span>
+          <span className="fs-5 fw-semibold">Snapcast</span>
+          <small className="app-version text-body-secondary me-auto">v{import.meta.env.VITE_APP_VERSION}</small>
           <div className="btn-group header-actions" role="group" aria-label="Actions">
             <button
               type="button"
@@ -235,7 +241,7 @@ export default function SnapWeb() {
         showOffline={showOffline}
         deletedClientIds={deletedClients.map(({ id }) => id)}
       />
-      {(deletedClients.length > 0 || !isConnected || (authRequired && !loginOpen)) && (
+      {(deletedClients.length > 0 || showConnectionAlert || showLoginAlert) && (
         <div className="notice-stack">
           {deletedClients.map(({ id, name }) => (
             <UndoDeleteNotice key={id} name={name} onClose={(undo) => handleUndoDeleteClose(id, undo)} />

@@ -113,6 +113,10 @@ describe('SnapWeb', () => {
     render(<SnapWeb />);
     await userEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Settings' }));
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+    // It would cover the dialog's buttons
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('alert')).toBeInTheDocument();
   });
 
   it('replaces a connection error once connected, or when the server url changes', async () => {

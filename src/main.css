@@ -122,7 +122,7 @@ body {
 
 .sw-dialog .modal-header {
   gap: 0.75rem;
-  padding-bottom: 1rem;
+  padding: 0.75rem 1rem 0.5rem var(--sw-space);
   border-bottom: 0;
 }
 
@@ -262,6 +262,11 @@ legend.section-label + * {
   background-color: var(--sw-header-bg);
   backdrop-filter: saturate(180%) blur(12px);
   -webkit-backdrop-filter: saturate(180%) blur(12px);
+}
+
+.app-version {
+  padding-top: 0.25rem;
+  font-size: 0.75rem;
 }
 
 .app-logo {
@@ -493,8 +498,18 @@ legend.section-label + * {
 
 /* Settings tabs and the client list in them */
 
+/* A fixed height, so switching tabs or expanding a client doesn't resize
+   the dialog; the body scrolls instead, under the tabs */
+.settings-dialog .modal-content {
+  height: 38rem;
+}
+
 .settings-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   margin-bottom: 1rem;
+  background-color: var(--sw-surface);
 }
 
 .client-accordion {

@@ -335,11 +335,7 @@ export default function SettingsDialog(props: SettingsDialogProps) {
       title="Settings"
       icon={Settings}
       onClose={handleClose}
-      footerStart={
-        <small className="text-body-secondary">
-          {import.meta.env.VITE_APP_NAME} {import.meta.env.VITE_APP_VERSION}
-        </small>
-      }
+      className="settings-dialog"
     >
       <Tabs defaultActiveKey="general" variant="underline" fill className="settings-tabs">
         <Tab eventKey="general" title="General">

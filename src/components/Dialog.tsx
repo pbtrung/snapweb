@@ -13,6 +13,8 @@ type DialogProps = {
   footerStart?: ReactNode;
   okLabel?: string;
   okDisabled?: boolean;
+  // Added to the modal, next to sw-dialog
+  className?: string;
   children: ReactNode;
 };
 
@@ -26,7 +28,7 @@ export default function Dialog(props: DialogProps) {
       onHide={() => props.onClose(false)}
       centered
       scrollable
-      className="sw-dialog"
+      className={'sw-dialog' + (props.className ? ' ' + props.className : '')}
       aria-labelledby={props.id + '-title'}
     >
       <Modal.Header closeButton>
