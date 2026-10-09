@@ -394,29 +394,32 @@ body {
 .stream-menu {
   --bs-dropdown-bg: var(--sw-surface);
   --bs-dropdown-border-color: var(--bs-border-color-translucent);
-  --bs-dropdown-border-radius: var(--sw-radius-sm);
-  --bs-dropdown-padding-x: 0.375rem;
-  --bs-dropdown-padding-y: 0.375rem;
-  --bs-dropdown-item-padding-x: 0.75rem;
-  --bs-dropdown-item-padding-y: 0.5rem;
-  --bs-dropdown-item-border-radius: 0.5rem;
+  --bs-dropdown-border-radius: 0.625rem;
+  --bs-dropdown-font-size: 0.875rem;
+  --bs-dropdown-min-width: 7rem;
+  --bs-dropdown-padding-x: 0.25rem;
+  --bs-dropdown-padding-y: 0.25rem;
+  --bs-dropdown-spacer: 0.25rem;
+  --bs-dropdown-item-padding-x: 0.625rem;
+  --bs-dropdown-item-padding-y: 0.25rem;
+  --bs-dropdown-item-border-radius: 0.375rem;
   --bs-dropdown-link-hover-bg: var(--sw-track);
   --bs-dropdown-link-active-bg: var(--bs-primary-bg-subtle);
   --bs-dropdown-link-active-color: var(--bs-primary-text-emphasis);
-  --bs-dropdown-box-shadow: 0 12px 32px rgba(16, 24, 40, 0.16);
-  min-width: 10rem;
-  max-width: min(18rem, calc(100vw - 2rem));
+  --bs-dropdown-box-shadow: 0 8px 24px rgba(16, 24, 40, 0.14);
+  max-width: min(16rem, calc(100vw - 2rem));
   max-height: 60vh;
   overflow-y: auto;
   box-shadow: var(--bs-dropdown-box-shadow);
 }
 
+/* The same type as the stream pill */
 .stream-menu .dropdown-item {
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .stream-menu .dropdown-item + .dropdown-item {
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .now-playing {
