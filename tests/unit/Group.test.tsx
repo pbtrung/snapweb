@@ -157,7 +157,7 @@ describe('Group', () => {
   it('switches the stream from the selector', async () => {
     renderGroup('g1');
     await userEvent.click(screen.getByRole('button', { name: 'Active stream: s1' }));
-    await userEvent.click(screen.getByRole('button', { name: /^s2/ }));
+    await userEvent.click(screen.getByRole('button', { name: 's2' }));
 
     expect(requests(ws, 'Group.SetStream')).toEqual([
       expect.objectContaining({ params: { id: 'g1', stream_id: 's2' } }),

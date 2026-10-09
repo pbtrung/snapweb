@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Dropdown } from 'react-bootstrap';
-import { AudioLines, Check, Clock, FolderOpen, Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-react';
+import { AudioLines, Clock, FolderOpen, Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
 import VolumeControl from './VolumeControl';
 import { SnapControl, Snapcast } from '../snapcontrol';
@@ -153,26 +153,18 @@ export default function Group(props: GroupProps) {
               <span className="text-truncate">{props.group.stream_id}</span>
             </Dropdown.Toggle>
             <Dropdown.Menu className="stream-menu">
-              <Dropdown.Header>Stream</Dropdown.Header>
               {props.server.streams.map((option) => {
                 const selected = option.id === props.group.stream_id;
-                const playing = option.status === 'playing';
                 return (
                   <Dropdown.Item
                     key={option.id}
                     as="button"
+                    className="text-truncate"
                     active={selected}
                     aria-current={selected || undefined}
                     onClick={() => props.snapcontrol.setStream(props.group.id, option.id)}
                   >
-                    <span className={'stream-menu-icon' + (playing ? ' playing' : '')} aria-hidden="true">
-                      <Radio size={14} />
-                    </span>
-                    <span className="flex-grow-1 overflow-hidden">
-                      <span className="d-block text-truncate">{option.id}</span>
-                      <span className="stream-menu-status">{playing ? 'Playing' : 'Idle'}</span>
-                    </span>
-                    {selected && <Check size={16} className="flex-shrink-0" aria-hidden="true" />}
+                    {option.id}
                   </Dropdown.Item>
                 );
               })}
