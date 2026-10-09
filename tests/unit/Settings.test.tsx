@@ -56,7 +56,7 @@ describe('SettingsDialog', () => {
       expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true');
       expect(screen.getByLabelText('Snapserver host')).toHaveValue('ws://old:1780');
       expect(screen.getByRole('radio', { name: 'Light' })).toBeChecked();
-      expect(screen.getByRole('checkbox', { name: 'Show offline clients' })).not.toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Show offline clients' })).not.toBeChecked();
     });
 
     it('saves the settings on OK', async () => {
@@ -65,7 +65,7 @@ describe('SettingsDialog', () => {
       await userEvent.clear(host);
       await userEvent.type(host, 'ws://new:1780');
       await userEvent.click(screen.getByRole('radio', { name: 'Dark' }));
-      await userEvent.click(screen.getByRole('checkbox', { name: 'Show offline clients' }));
+      await userEvent.click(screen.getByRole('switch', { name: 'Show offline clients' }));
       await ok();
 
       expect(onClose).toHaveBeenCalledWith(true);
@@ -78,7 +78,7 @@ describe('SettingsDialog', () => {
     it('keeps the settings on Cancel', async () => {
       const { onClose } = renderSettings();
       await userEvent.type(screen.getByLabelText('Snapserver host'), '/x');
-      await userEvent.click(screen.getByRole('checkbox', { name: 'Show offline clients' }));
+      await userEvent.click(screen.getByRole('switch', { name: 'Show offline clients' }));
       await cancel();
 
       expect(onClose).toHaveBeenCalledWith(false);

@@ -376,7 +376,7 @@ describe('SnapWeb', () => {
     render(<SnapWeb />);
     connect();
     await openSettings();
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Show offline clients' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Show offline clients' }));
     await userEvent.click(screen.getByRole('button', { name: 'OK' }));
 
     expect(FakeWebSocket.instances).toHaveLength(1);

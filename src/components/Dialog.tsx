@@ -18,7 +18,7 @@ type DialogProps = {
   children: ReactNode;
 };
 
-// A modal with a title, a body of dialog sections and Cancel/OK, so all
+// A modal with a title, a body and Cancel/OK, so all
 // dialogs share the same layout and spacing
 export default function Dialog(props: DialogProps) {
   const Icon = props.icon;
@@ -52,15 +52,5 @@ export default function Dialog(props: DialogProps) {
         </div>
       </Modal.Footer>
     </Modal>
-  );
-}
-
-// A titled group of fields in a dialog
-export function DialogSection(props: { title: string; children: ReactNode }) {
-  return (
-    <fieldset className="dialog-section">
-      <legend className="section-label">{props.title}</legend>
-      {props.children}
-    </fieldset>
   );
 }

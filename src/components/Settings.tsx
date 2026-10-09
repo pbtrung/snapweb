@@ -1,7 +1,21 @@
-import { useState } from 'react';
-import { Accordion, Button, Form, InputGroup, Tab, Tabs, ToggleButton, ToggleButtonGroup } from 'react-bootstrap';
-import { LogOut, Monitor, Moon, Settings, Sun, Trash2 } from 'lucide-react';
-import Dialog, { DialogSection } from './Dialog';
+import { Fragment, useState, type ReactNode } from 'react';
+import { Accordion, Button, Form, InputGroup, Tab, Tabs } from 'react-bootstrap';
+import {
+  Boxes,
+  Check,
+  LogOut,
+  Monitor,
+  Moon,
+  Plus,
+  Settings,
+  ShieldCheck,
+  SlidersHorizontal,
+  Speaker,
+  Sun,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react';
+import Dialog from './Dialog';
 import { config, Theme } from '../config';
 import { SnapControl, Snapcast } from '../snapcontrol';
 
@@ -149,7 +163,7 @@ export default function SettingsDialog(props: SettingsDialogProps) {
 
   const general = (
     <>
-      <DialogSection title="Connection">
+      <SettingsSection title="Connection">
         <Form.Group controlId="settings-host">
           <Form.Label>Snapserver host</Form.Label>
           <Form.Control
@@ -162,8 +176,11 @@ export default function SettingsDialog(props: SettingsDialogProps) {
           />
         </Form.Group>
         {props.loggedIn && (
-          <div className="d-flex align-items-center justify-content-between gap-3 mt-3">
-            <span className="small text-body-secondary">Logged in to the control API</span>
+          <div className="settings-row">
+            <span className="d-inline-flex align-items-center gap-2 small text-body-secondary">
+              <ShieldCheck size={16} className="text-success" aria-hidden="true" />
+              Logged in to the control API
+            </span>
             <Button
               variant="outline-danger"
               size="sm"
@@ -175,52 +192,72 @@ export default function SettingsDialog(props: SettingsDialogProps) {
             </Button>
           </div>
         )}
-      </DialogSection>
-      <DialogSection title="Appearance">
-        <Form.Group className="mb-3">
-          <Form.Label as="div" id="settings-theme">
-            Theme
-          </Form.Label>
-          <ToggleButtonGroup
-            type="radio"
-            name="theme"
-            className="segmented w-100"
-            aria-labelledby="settings-theme"
-            value={theme}
-            onChange={(value: Theme) => setTheme(value)}
-          >
-            {themes.map(({ value, label, icon: Icon }) => (
-              <ToggleButton
-                key={value}
-                id={'settings-theme-' + value}
+      </SettingsSection>
+      <SettingsSection title="Appearance">
+        <Form.Label as="div" id="settings-theme">
+          Theme
+        </Form.Label>
+        <div className="segmented" role="radiogroup" aria-labelledby="settings-theme">
+          {themes.map(({ value, label, icon: Icon }) => (
+            <label key={value} className="segmented-option">
+              <input
+                type="radio"
+                name="settings-theme"
                 value={value}
-                variant="outline-primary"
-                className="d-inline-flex align-items-center justify-content-center gap-2"
-              >
-                <Icon size={16} aria-hidden="true" />
-                {label}
-              </ToggleButton>
-            ))}
-          </ToggleButtonGroup>
-        </Form.Group>
-        <Form.Check
-          type="switch"
-          id="settings-show-offline"
-          label="Show offline clients"
-          checked={showOffline}
-          onChange={(event) => setShowOffline(event.target.checked)}
-        />
-      </DialogSection>
+                checked={theme === value}
+                onChange={() => setTheme(value)}
+              />
+              <Icon size={16} aria-hidden="true" />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div className="settings-row">
+          <div>
+            <label htmlFor="settings-show-offline" className="fw-medium">
+              Show offline clients
+            </label>
+            <div id="settings-show-offline-hint" className="small text-body-secondary">
+              List clients that aren't connected
+            </div>
+          </div>
+          <div className="form-check form-switch m-0">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              role="switch"
+              id="settings-show-offline"
+              aria-describedby="settings-show-offline-hint"
+              checked={showOffline}
+              onChange={(event) => setShowOffline(event.target.checked)}
+            />
+          </div>
+        </div>
+      </SettingsSection>
     </>
   );
 
   const groupSettings = groups.map((group, index) => {
     const idPrefix = 'settings-group-' + group.id;
+    const memberCount = visibleClients.filter((client) => groupIds[client.id] === group.id).length;
     return (
-      <DialogSection key={group.id} title={groupLabel(group, index)}>
-        <Form.Group className="mb-3" controlId={idPrefix + '-stream'}>
-          <Form.Label>Stream</Form.Label>
+      <div key={group.id} className="settings-card" role="group" aria-labelledby={idPrefix + '-name'}>
+        <div className="d-flex align-items-center gap-3">
+          <span className="settings-avatar" aria-hidden="true">
+            <Boxes size={18} />
+          </span>
+          <div className="flex-grow-1 overflow-hidden">
+            <div id={idPrefix + '-name'} className="fw-semibold text-truncate">
+              {groupLabel(group, index)}
+            </div>
+            <div className="small text-body-secondary">
+              {memberCount} {memberCount === 1 ? 'client' : 'clients'}
+            </div>
+          </div>
           <Form.Select
+            size="sm"
+            className="settings-stream"
+            aria-label="Stream"
             value={streamIds[group.id]}
             onChange={(event) => setStreamIds((ids) => ({ ...ids, [group.id]: event.target.value }))}
           >
@@ -230,30 +267,33 @@ export default function SettingsDialog(props: SettingsDialogProps) {
               </option>
             ))}
           </Form.Select>
-        </Form.Group>
-        <Form.Label as="div" id={idPrefix + '-clients'}>
-          Clients
-        </Form.Label>
-        <div className="list-group check-list" role="group" aria-labelledby={idPrefix + '-clients'}>
-          {visibleClients.map((client) => (
-            <label key={client.id} className="list-group-item d-flex align-items-center gap-3">
-              <input
-                className="form-check-input m-0 flex-shrink-0"
-                type="checkbox"
-                checked={groupIds[client.id] === group.id}
-                onChange={(event) => handleGroupClientChange(client.id, group.id, event.target.checked)}
-              />
-              <span className="text-truncate">{client.getName()}</span>
-              {!client.connected && (
-                // Hidden from the checkbox's name, which is the client name
-                <span className="badge rounded-pill text-bg-secondary fw-normal ms-auto" aria-hidden="true">
-                  offline
-                </span>
-              )}
-            </label>
-          ))}
         </div>
-      </DialogSection>
+        <div className="chip-list">
+          {visibleClients.map((client) => {
+            const checked = groupIds[client.id] === group.id;
+            const id = idPrefix + '-client-' + client.id;
+            return (
+              <Fragment key={client.id}>
+                <input
+                  className="btn-check"
+                  type="checkbox"
+                  id={id}
+                  checked={checked}
+                  onChange={(event) => handleGroupClientChange(client.id, group.id, event.target.checked)}
+                />
+                <label className="chip" htmlFor={id}>
+                  {checked ? <Check size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
+                  <span className="text-truncate">{client.getName()}</span>
+                  {!client.connected && (
+                    // Hidden from the checkbox's name, which is the client name
+                    <span className="status-dot" title="offline" aria-hidden="true" />
+                  )}
+                </label>
+              </Fragment>
+            );
+          })}
+        </div>
+      </div>
     );
   });
 
@@ -263,63 +303,75 @@ export default function SettingsDialog(props: SettingsDialogProps) {
         const edit = clientEdits[client.id];
         const idPrefix = 'settings-client-' + client.id;
         const readOnlyFields: [string, string][] = [
-          ['Client', client.snapclient.name + ' ' + client.snapclient.version],
-          ['MAC', client.host.mac],
-          ['ID', client.id],
-          ['IP', client.host.ip],
           ['Host', client.host.name],
+          ['IP', client.host.ip],
+          ['MAC', client.host.mac],
           ['OS', client.host.os],
+          ['Client', client.snapclient.name + ' ' + client.snapclient.version],
+          ['ID', client.id],
         ];
         return (
           <Accordion.Item key={client.id} eventKey={client.id}>
             <Accordion.Header>
-              <span className="text-truncate">{client.getName()}</span>
-              {!client.connected && (
-                <span className="badge rounded-pill text-bg-secondary fw-normal ms-2" aria-hidden="true">
-                  offline
+              <span className={'settings-avatar' + (client.connected ? '' : ' offline')} aria-hidden="true">
+                <Speaker size={18} />
+              </span>
+              <span className="flex-grow-1 overflow-hidden text-start">
+                <span className="d-block fw-semibold text-truncate">{client.getName()}</span>
+                {/* Repeats the details below, so hidden from the button's name */}
+                <span className="d-flex align-items-center gap-2 small text-body-secondary" aria-hidden="true">
+                  <span className={'status-dot' + (client.connected ? ' online' : '')} />
+                  <span className="text-truncate">
+                    {client.connected ? 'Online' : 'Offline'} · {client.host.ip}
+                  </span>
                 </span>
-              )}
+              </span>
             </Accordion.Header>
             <Accordion.Body role="group" aria-label={client.getName()}>
-              <Form.Group className="mb-3" controlId={idPrefix + '-name'}>
-                <Form.Label>Name</Form.Label>
-                <Form.Control
-                  type="text"
-                  spellCheck={false}
-                  placeholder={client.host.name}
-                  value={edit.name}
-                  onChange={(event) => updateClientEdit(client.id, { name: event.target.value })}
-                />
-              </Form.Group>
-              <Form.Group className="mb-3" controlId={idPrefix + '-latency'}>
-                <Form.Label>Latency</Form.Label>
-                <InputGroup>
+              <div className="client-fields">
+                <Form.Group controlId={idPrefix + '-name'}>
+                  <Form.Label>Name</Form.Label>
                   <Form.Control
-                    type="number"
-                    value={edit.latencyText}
-                    onChange={(event) => handleLatencyChange(client.id, event.target.value)}
+                    type="text"
+                    spellCheck={false}
+                    placeholder={client.host.name}
+                    value={edit.name}
+                    onChange={(event) => updateClientEdit(client.id, { name: event.target.value })}
                   />
-                  <InputGroup.Text>ms</InputGroup.Text>
-                </InputGroup>
-              </Form.Group>
-              <div className="info-list">
+                </Form.Group>
+                <Form.Group controlId={idPrefix + '-latency'}>
+                  <Form.Label>Latency</Form.Label>
+                  <InputGroup>
+                    <Form.Control
+                      type="number"
+                      value={edit.latencyText}
+                      onChange={(event) => handleLatencyChange(client.id, event.target.value)}
+                    />
+                    <InputGroup.Text>ms</InputGroup.Text>
+                  </InputGroup>
+                </Form.Group>
+              </div>
+              <div className="detail-grid">
                 {readOnlyFields.map(([label, value]) => (
-                  <Form.Group key={label} className="info-row" controlId={idPrefix + '-' + label}>
+                  <Form.Group key={label} className="detail" controlId={idPrefix + '-' + label}>
                     <Form.Label>{label}</Form.Label>
-                    <Form.Control plaintext readOnly value={value} />
+                    <Form.Control plaintext readOnly value={value} title={value} />
                   </Form.Group>
                 ))}
               </div>
               {!client.connected && (
-                <Button
-                  variant="outline-danger"
-                  size="sm"
-                  className="d-inline-flex align-items-center gap-2 mt-3"
-                  onClick={() => props.onClientDelete(client)}
-                >
-                  <Trash2 size={16} aria-hidden="true" />
-                  Delete
-                </Button>
+                <div className="settings-row">
+                  <span className="small text-body-secondary">Offline clients can be removed from the server</span>
+                  <Button
+                    variant="outline-danger"
+                    size="sm"
+                    className="d-inline-flex align-items-center gap-2 flex-shrink-0"
+                    onClick={() => props.onClientDelete(client)}
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                    Delete
+                  </Button>
+                </div>
               )}
             </Accordion.Body>
           </Accordion.Item>
@@ -334,20 +386,44 @@ export default function SettingsDialog(props: SettingsDialogProps) {
       id="settings"
       title="Settings"
       icon={Settings}
-      onClose={handleClose}
       className="settings-dialog"
+      onClose={handleClose}
     >
-      <Tabs defaultActiveKey="general" variant="underline" fill className="settings-tabs">
-        <Tab eventKey="general" title="General">
+      <Tabs defaultActiveKey="general" variant="pills" fill className="settings-tabs">
+        <Tab eventKey="general" title={<TabTitle icon={SlidersHorizontal} label="General" />}>
           {general}
         </Tab>
-        <Tab eventKey="groups" title="Groups" disabled={groups.length === 0}>
-          {groupSettings}
+        <Tab eventKey="groups" title={<TabTitle icon={Boxes} label="Groups" />} disabled={groups.length === 0}>
+          <div className="settings-stack">{groupSettings}</div>
         </Tab>
-        <Tab eventKey="clients" title="Clients" disabled={visibleClients.length === 0}>
+        <Tab
+          eventKey="clients"
+          title={<TabTitle icon={Speaker} label="Clients" />}
+          disabled={visibleClients.length === 0}
+        >
           {clientSettings}
         </Tab>
       </Tabs>
     </Dialog>
+  );
+}
+
+function TabTitle(props: { icon: LucideIcon; label: string }) {
+  const Icon = props.icon;
+  return (
+    <span className="d-inline-flex align-items-center justify-content-center gap-2">
+      <Icon size={16} aria-hidden="true" />
+      {props.label}
+    </span>
+  );
+}
+
+// A titled card of settings
+function SettingsSection(props: { title: string; children: ReactNode }) {
+  return (
+    <section className="settings-section" aria-label={props.title}>
+      <h6 className="section-label">{props.title}</h6>
+      <div className="settings-card">{props.children}</div>
+    </section>
   );
 }
