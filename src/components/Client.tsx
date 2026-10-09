@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Speaker } from 'lucide-react';
 import { SnapControl, Snapcast } from '../snapcontrol';
 import VolumeControl from './VolumeControl';
 
@@ -27,8 +28,12 @@ export default function Client(props: ClientProps) {
   }
 
   return (
-    <li className="list-group-item client-row" style={{ opacity: client.connected ? 1.0 : 0.5 }}>
-      <div className="d-flex align-items-center gap-2 client-heading">
+    <li className={'list-group-item client-row' + (client.connected ? '' : ' offline')}>
+      <div className="d-flex align-items-center gap-2">
+        <span className="client-avatar" aria-hidden="true">
+          <Speaker size={16} />
+          <span className={'status-dot' + (client.connected ? ' online' : '')} />
+        </span>
         <span className="client-name text-truncate">{displayName}</span>
         {!client.connected && (
           <span className="badge rounded-pill text-bg-secondary fw-normal flex-shrink-0">offline</span>

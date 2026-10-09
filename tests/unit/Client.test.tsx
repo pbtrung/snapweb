@@ -39,7 +39,7 @@ describe('Client', () => {
 
   it('dims offline clients', () => {
     const { container } = renderClient('c3');
-    expect(container.firstChild).toHaveStyle({ opacity: '0.5' });
+    expect(container.firstChild).toHaveClass('offline');
   });
 
   it('shows the client volume', () => {

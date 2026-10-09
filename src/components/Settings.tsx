@@ -28,6 +28,9 @@ const themes = [
 type SettingsDialogProps = {
   open: boolean;
   onClose: (_apply: boolean) => void;
+  // Called as the theme is picked, so it shows before OK; on Cancel the
+  // saved theme is shown again
+  onThemeChange?: (theme: Theme) => void;
   server: Snapcast.Server;
   snapcontrol: SnapControl;
   // Clients waiting for their delete to be undone or carried out, hidden here
@@ -205,7 +208,10 @@ export default function SettingsDialog(props: SettingsDialogProps) {
                 name="settings-theme"
                 value={value}
                 checked={theme === value}
-                onChange={() => setTheme(value)}
+                onChange={() => {
+                  setTheme(value);
+                  props.onThemeChange?.(value);
+                }}
               />
               <Icon size={16} aria-hidden="true" />
               {label}

@@ -58,6 +58,13 @@
 }
 
 body {
+  /* A faint wash of the brand color behind the top of the page */
+  background-image: radial-gradient(
+    ellipse 120% 28rem at 50% -8rem,
+    rgba(var(--bs-primary-rgb), 0.12),
+    transparent 70%
+  );
+  background-repeat: no-repeat;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -203,14 +210,67 @@ body {
   -webkit-backdrop-filter: saturate(180%) blur(12px);
 }
 
+.app-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
 .app-version {
-  padding-top: 0.25rem;
-  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--bs-secondary-color);
+  background-color: var(--sw-track);
 }
 
 .app-logo {
   width: 32px;
   height: 32px;
+  border-radius: 0.5rem;
+}
+
+/* Play on this device: a pill with a label on wider screens */
+.btn-listen {
+  --bs-btn-padding-x: 0.875rem;
+  --bs-btn-padding-y: 0;
+  --bs-btn-font-size: 0.875rem;
+  --bs-btn-font-weight: 600;
+  --bs-btn-border-radius: 999px;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 575.98px) {
+  .btn-listen {
+    --bs-btn-padding-x: 0;
+    width: 2.25rem;
+  }
+}
+
+.btn-listen.playing {
+  animation: listen-pulse 2s ease-out infinite;
+}
+
+@keyframes listen-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--bs-primary-rgb), 0.45);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 0.625rem rgba(var(--bs-primary-rgb), 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-listen.playing {
+    animation: none;
+  }
 }
 
 .app-main {
@@ -254,13 +314,6 @@ body {
   --bs-btn-active-color: var(--bs-danger);
 }
 
-/* Pill shaped group of icon buttons */
-.header-actions > .btn-icon {
-  --bs-btn-border-radius: 50rem;
-  width: 2.75rem;
-  border-radius: var(--bs-btn-border-radius);
-}
-
 /* Group cards */
 
 .group-card {
@@ -272,8 +325,38 @@ body {
   --bs-card-spacer-y: var(--sw-space);
   box-shadow:
     0 1px 2px rgba(16, 24, 40, 0.04),
-    0 4px 16px rgba(16, 24, 40, 0.04);
+    0 8px 24px rgba(16, 24, 40, 0.06);
   overflow: hidden;
+}
+
+[data-bs-theme='dark'] .group-card {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.group-name {
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* Rounded square in front of the group name, lit while its stream plays */
+.group-status {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 0.625rem;
+  color: var(--bs-secondary-color);
+  background-color: var(--sw-track);
+  transition:
+    color 0.2s ease-in-out,
+    background-color 0.2s ease-in-out;
+}
+
+.group-status.playing {
+  color: var(--bs-primary-text-emphasis);
+  background-color: var(--bs-primary-bg-subtle);
 }
 
 .group-card .list-group {
@@ -283,36 +366,109 @@ body {
 /* Client rows line up with the card body, so their sliders line up with
    the group volume slider */
 .client-row {
-  padding: 0.625rem var(--sw-space);
+  padding: 0.75rem var(--sw-space) 0.5rem;
 }
 
-.client-heading {
-  padding-left: 0.25rem;
+.client-row.offline {
+  opacity: 0.55;
+}
+
+/* Lines up with the mute button below it */
+.client-avatar {
+  position: relative;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--bs-secondary-color);
+  background-color: var(--sw-track);
+}
+
+.client-avatar .status-dot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 0.625rem;
+  height: 0.625rem;
+  box-shadow: 0 0 0 2px var(--sw-surface);
+  opacity: 1;
 }
 
 .stream-select {
-  max-width: 14rem;
+  width: auto;
+  max-width: 45%;
   border-radius: 999px;
   font-weight: 500;
 }
 
 .cover-art {
-  width: 96px;
-  height: 96px;
+  width: 112px;
+  height: 112px;
   object-fit: cover;
-  border-radius: calc(var(--sw-radius-sm) - 0.25rem);
-  flex-shrink: 0;
-  background-color: var(--bs-tertiary-bg);
-}
-
-.now-playing {
-  padding: 0.75rem;
-  background-color: var(--bs-tertiary-bg);
   border-radius: var(--sw-radius-sm);
+  flex-shrink: 0;
+  background-color: var(--sw-track);
+  box-shadow: 0 6px 20px rgba(16, 24, 40, 0.2);
 }
 
+.cover-art-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bs-secondary-color);
+  box-shadow: none;
+}
+
+/* The cover art, blurred, behind the track details */
+.now-playing {
+  position: relative;
+  overflow: hidden;
+  padding: 1rem;
+  border-radius: var(--sw-radius-sm);
+  background: linear-gradient(135deg, rgba(var(--bs-primary-rgb), 0.1), rgba(var(--bs-primary-rgb), 0.03));
+}
+
+.now-playing-backdrop {
+  position: absolute;
+  inset: -2rem;
+  background-size: cover;
+  background-position: center;
+  filter: blur(32px) saturate(140%);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+[data-bs-theme='dark'] .now-playing-backdrop {
+  opacity: 0.3;
+}
+
+.now-playing-content {
+  position: relative;
+}
+
+.track-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.btn-play {
+  width: 2.75rem;
+  height: 2.75rem;
+  box-shadow: 0 4px 12px rgba(var(--bs-primary-rgb), 0.35);
+}
+
+.group-volume {
+  padding: 0.5rem 0 0;
+}
+
+/* Inline, so it is centered with the title on narrow screens */
 .track-meta {
-  display: grid;
+  display: inline-grid;
+  max-width: 100%;
+  text-align: start;
   grid-template-columns: auto 1fr;
   column-gap: 0.375rem;
 }
@@ -416,6 +572,41 @@ body {
   --bs-primary: var(--bs-secondary-color);
 }
 
+.volume-value {
+  width: 2rem;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--bs-secondary-color);
+}
+
+.volume-value.muted {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* Shown when no client is listed */
+.empty-state {
+  padding: 3rem 1rem;
+  text-align: center;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--sw-radius-lg);
+}
+
+.empty-state-icon {
+  width: 4rem;
+  height: 4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+  border-radius: 50%;
+  color: var(--bs-primary-text-emphasis);
+  background-color: var(--bs-primary-bg-subtle);
+}
+
 /* Bottom notices */
 
 .notice-stack {
@@ -432,7 +623,23 @@ body {
 
 .notice-stack .alert {
   margin: 0;
+  border-radius: var(--sw-radius-sm);
   box-shadow: 0 8px 24px rgba(16, 24, 40, 0.16);
+  backdrop-filter: blur(8px);
+  animation: notice-in 0.2s ease-out;
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notice-stack .alert {
+    animation: none;
+  }
 }
 
 /* Settings: a tinted sheet of cards between a plain header and footer */

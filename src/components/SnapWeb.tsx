@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { Alert, Button, Spinner } from 'react-bootstrap';
-import { Play, Settings, Square } from 'lucide-react';
+import { Headphones, Settings, Square } from 'lucide-react';
 import Server from './Server';
 import SettingsDialog from './Settings';
 import LoginDialog from './Login';
@@ -209,29 +209,32 @@ export default function SnapWeb() {
       <header className="app-header sticky-top border-bottom">
         <nav className="app-main container-fluid d-flex align-items-center gap-2 py-2">
           <img src={logo} alt="" className="app-logo" />
-          <span className="fs-5 fw-semibold">Snapcast</span>
-          <small className="app-version text-body-secondary me-auto">v{import.meta.env.VITE_APP_VERSION}</small>
-          <div className="btn-group header-actions" role="group" aria-label="Actions">
-            <button
-              type="button"
-              className="btn btn-outline-primary btn-icon"
-              aria-label="Open settings"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings size={18} />
-            </button>
+          <span className="app-title">Snapcast</span>
+          <small className="app-version me-auto">v{import.meta.env.VITE_APP_VERSION}</small>
+          <div className="header-actions d-flex align-items-center gap-2" role="group" aria-label="Actions">
             {/* Playback carries on without the control connection, so it can always be stopped */}
             {(isConnected || isPlaying) && (
               <button
                 type="button"
-                className={'btn btn-icon ' + (isPlaying ? 'btn-primary' : 'btn-outline-primary')}
+                className={'btn btn-listen ' + (isPlaying ? 'btn-primary playing' : 'btn-outline-primary')}
                 aria-label={isPlaying ? 'Stop playing' : 'Play on this device'}
                 aria-pressed={isPlaying}
                 onClick={() => setIsPlaying(!isPlaying)}
               >
-                {isPlaying ? <Square size={16} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+                {isPlaying ? <Square size={14} fill="currentColor" /> : <Headphones size={16} />}
+                <span className="d-none d-sm-inline" aria-hidden="true">
+                  {isPlaying ? 'Listening' : 'Listen here'}
+                </span>
               </button>
             )}
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon"
+              aria-label="Open settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={20} />
+            </button>
           </div>
         </nav>
       </header>
@@ -270,9 +273,11 @@ export default function SnapWeb() {
           snapcontrol={snapControl}
           deletedClientIds={deletedClients.map(({ id }) => id)}
           onClientDelete={handleClientDelete}
+          onThemeChange={setTheme}
           loggedIn={snapControl.loggedIn}
           onLogout={() => {
             setSettingsOpen(false);
+            setTheme(config.theme);
             snapControl.logout();
           }}
           onClose={(apply: boolean) => {
@@ -287,9 +292,11 @@ export default function SnapWeb() {
                 setConnectError('');
               }
               setServerUrl(config.baseUrl);
-              setTheme(config.theme);
               setShowOffline(config.showOffline);
             }
+            // The theme was shown live while picking, so this keeps it on
+            // OK and goes back to the saved one on Cancel
+            setTheme(config.theme);
           }}
         />
       )}

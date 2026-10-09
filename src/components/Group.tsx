@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Form } from 'react-bootstrap';
-import { Clock, FolderOpen, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
+import { AudioLines, Clock, FolderOpen, Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
 import VolumeControl from './VolumeControl';
 import { SnapControl, Snapcast } from '../snapcontrol';
@@ -99,11 +99,53 @@ export default function Group(props: GroupProps) {
   const artist = metadata?.artist ? metadata.artist.join(', ') : 'Unknown Artist';
   const hasDuration = metadata?.duration !== undefined && metadata.duration > 0;
   const isPlaying = stream?.properties.playbackStatus === 'playing';
+  // A stream without playback control still reports whether audio is coming in
+  const isActive = isPlaying || stream?.status === 'playing';
+
+  const controls = stream?.properties.canControl && (
+    <div className="transport d-flex align-items-center gap-1">
+      <button
+        type="button"
+        className="btn btn-ghost btn-icon"
+        aria-label="Previous"
+        onClick={() => props.snapcontrol.control(stream.id, 'previous')}
+      >
+        <SkipBack size={18} fill="currentColor" />
+      </button>
+      <button
+        type="button"
+        className="btn btn-primary btn-icon btn-play"
+        aria-label={isPlaying ? 'Pause' : 'Play'}
+        onClick={() => handlePlayPauseClicked(stream)}
+      >
+        {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+      </button>
+      <button
+        type="button"
+        className="btn btn-ghost btn-icon"
+        aria-label="Next"
+        onClick={() => props.snapcontrol.control(stream.id, 'next')}
+      >
+        <SkipForward size={18} fill="currentColor" />
+      </button>
+    </div>
+  );
+  const artUrl = metadata?.artUrl && metadata.artUrl !== brokenArtUrl ? metadata.artUrl : undefined;
 
   return (
-    <section className="card group-card">
+    <section className="card group-card" aria-label={props.group.name || undefined}>
       <div className="card-body">
-        <div className="d-flex align-items-center gap-2">
+        <div className="group-heading d-flex align-items-center gap-2">
+          <span className={'group-status' + (isActive ? ' playing' : '')} aria-hidden="true">
+            <AudioLines size={16} />
+          </span>
+          <div className="flex-grow-1 overflow-hidden">
+            {props.group.name && <div className="group-name text-truncate">{props.group.name}</div>}
+            <div className="small text-body-secondary text-truncate">
+              {clients.length} {clients.length === 1 ? 'client' : 'clients'}
+              {stream && (isActive ? ' · Playing' : ' · Idle')}
+            </div>
+          </div>
           <Form.Select
             size="sm"
             className="stream-select"
@@ -117,77 +159,60 @@ export default function Group(props: GroupProps) {
               </option>
             ))}
           </Form.Select>
-          <div className="flex-grow-1" />
-          {stream?.properties.canControl && (
-            <div className="d-flex align-items-center gap-1">
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon"
-                aria-label="Previous"
-                onClick={() => props.snapcontrol.control(stream.id, 'previous')}
-              >
-                <SkipBack size={18} />
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-icon"
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-                onClick={() => handlePlayPauseClicked(stream)}
-              >
-                {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon"
-                aria-label="Next"
-                onClick={() => props.snapcontrol.control(stream.id, 'next')}
-              >
-                <SkipForward size={18} />
-              </button>
-            </div>
-          )}
         </div>
 
-        {metadata && (
-          <div className="now-playing d-flex flex-column flex-sm-row align-items-center gap-3 mt-3">
-            {metadata.artUrl && metadata.artUrl !== brokenArtUrl && (
-              <img
-                className="cover-art"
-                src={metadata.artUrl}
-                alt={title + ' cover'}
-                // Unreachable cover art, e.g. a URL only the server can resolve
-                onError={() => setBrokenArtUrl(metadata.artUrl!)}
-              />
-            )}
-            <div className="flex-grow-1 overflow-hidden align-self-stretch align-self-sm-auto">
-              <div className="fw-semibold text-truncate">{title}</div>
-              <div className="text-body-secondary text-truncate">{artist}</div>
-              {(hasDuration || metadata.url) && (
-                <dl className="track-meta small text-body-secondary mb-0 mt-1">
-                  {hasDuration && (
-                    <>
-                      <dt>
-                        <Clock size={14} role="img" aria-label="Duration" />
-                      </dt>
-                      <dd>{formatDuration(metadata.duration!)}</dd>
-                    </>
-                  )}
-                  {metadata.url && (
-                    <>
-                      <dt>
-                        <FolderOpen size={14} role="img" aria-label="Path" />
-                      </dt>
-                      <dd>{metadata.url}</dd>
-                    </>
-                  )}
-                </dl>
+        {metadata ? (
+          <div className="now-playing mt-3">
+            {artUrl && <div className="now-playing-backdrop" style={{ backgroundImage: `url("${artUrl}")` }} />}
+            <div className="now-playing-content d-flex flex-column flex-sm-row align-items-center gap-3">
+              {artUrl ? (
+                <img
+                  className="cover-art"
+                  src={artUrl}
+                  alt={title + ' cover'}
+                  // Unreachable cover art, e.g. a URL only the server can resolve
+                  onError={() => setBrokenArtUrl(artUrl)}
+                />
+              ) : (
+                <span className="cover-art cover-art-empty" aria-hidden="true">
+                  <Music size={36} strokeWidth={1.5} />
+                </span>
               )}
+              <div className="flex-grow-1 overflow-hidden align-self-stretch align-self-sm-auto text-center text-sm-start">
+                <div className="track-title text-truncate">{title}</div>
+                <div className="text-body-secondary text-truncate">{artist}</div>
+                {(hasDuration || metadata.url) && (
+                  <dl className="track-meta small text-body-secondary mb-0 mt-1">
+                    {hasDuration && (
+                      <>
+                        <dt>
+                          <Clock size={14} role="img" aria-label="Duration" />
+                        </dt>
+                        <dd>{formatDuration(metadata.duration!)}</dd>
+                      </>
+                    )}
+                    {metadata.url && (
+                      <>
+                        <dt>
+                          <FolderOpen size={14} role="img" aria-label="Path" />
+                        </dt>
+                        <dd>{metadata.url}</dd>
+                      </>
+                    )}
+                  </dl>
+                )}
+                {controls && (
+                  <div className="mt-2 d-flex justify-content-center justify-content-sm-start">{controls}</div>
+                )}
+              </div>
             </div>
           </div>
+        ) : (
+          controls && <div className="mt-3 d-flex justify-content-center">{controls}</div>
         )}
 
         {clients.length > 1 && (
-          <div className="mt-3">
+          <div className="group-volume mt-3">
             <div className="section-label mb-0 ps-1">Group volume</div>
             <VolumeControl
               label={groupName}

@@ -29,9 +29,12 @@ export default function Server(props: ServerProps) {
         />
       ))}
       {groups.length > 0 && !hasClients && (
-        <div className="text-center text-body-secondary py-5">
-          <Speaker size={48} strokeWidth={1.5} className="mb-3 opacity-50" aria-hidden="true" />
-          <p className="mb-0">No clients are online</p>
+        <div className="empty-state">
+          <span className="empty-state-icon" aria-hidden="true">
+            <Speaker size={32} strokeWidth={1.5} />
+          </span>
+          <p className="fw-semibold mb-1">No clients are online</p>
+          <p className="small text-body-secondary mb-0">Start a Snapclient, or show offline clients in the settings</p>
         </div>
       )}
     </main>

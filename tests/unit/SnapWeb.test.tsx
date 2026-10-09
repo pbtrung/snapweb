@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SnapWeb from '../../src/components/SnapWeb';
-import { authToken, config } from '../../src/config';
+import { authToken, config, Theme } from '../../src/config';
 import { FakeWebSocket } from '../helpers/fakeWebSocket';
 import { makeServerStatus } from '../fixtures/serverStatus';
 import { quietConsole, requests } from '../helpers/snapControl';
@@ -392,6 +392,24 @@ describe('SnapWeb', () => {
     await openSettings();
 
     expect(screen.getByLabelText('Snapserver host')).toHaveValue('ws://snapserver:1780');
+  });
+
+  it('shows a picked theme before OK and goes back to the saved one on Cancel', async () => {
+    config.theme = Theme.Light;
+    render(<SnapWeb />);
+    await openSettings();
+    await userEvent.click(screen.getByRole('radio', { name: 'Dark' }));
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
+    expect(config.theme).toBe(Theme.Light);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'light');
+
+    await openSettings();
+    await userEvent.click(screen.getByRole('radio', { name: 'Dark' }));
+    await userEvent.click(screen.getByRole('button', { name: 'OK' }));
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
+    expect(config.theme).toBe(Theme.Dark);
   });
 
   it('starts and stops local playback', async () => {
