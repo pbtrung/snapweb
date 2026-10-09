@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
-import { Form } from 'react-bootstrap';
-import { AudioLines, Clock, FolderOpen, Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-react';
+import { Dropdown } from 'react-bootstrap';
+import { AudioLines, Check, Clock, FolderOpen, Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
 import VolumeControl from './VolumeControl';
 import { SnapControl, Snapcast } from '../snapcontrol';
@@ -143,20 +143,41 @@ export default function Group(props: GroupProps) {
               {stream && (isActive ? ' · Playing' : ' · Idle')}
             </div>
           </div>
-          <div className="stream-picker">
-            <Radio size={14} aria-hidden="true" />
-            <Form.Select
-              aria-label="Active stream"
-              value={props.group.stream_id}
-              onChange={(event) => props.snapcontrol.setStream(props.group.id, event.target.value)}
+          <Dropdown align="end" className="stream-picker">
+            <Dropdown.Toggle
+              variant=""
+              className="stream-toggle"
+              aria-label={'Active stream: ' + props.group.stream_id}
             >
-              {props.server.streams.map((stream) => (
-                <option key={stream.id} value={stream.id}>
-                  {stream.id}
-                </option>
-              ))}
-            </Form.Select>
-          </div>
+              <Radio size={14} aria-hidden="true" />
+              <span className="text-truncate">{props.group.stream_id}</span>
+            </Dropdown.Toggle>
+            <Dropdown.Menu className="stream-menu">
+              <Dropdown.Header>Stream</Dropdown.Header>
+              {props.server.streams.map((option) => {
+                const selected = option.id === props.group.stream_id;
+                const playing = option.status === 'playing';
+                return (
+                  <Dropdown.Item
+                    key={option.id}
+                    as="button"
+                    active={selected}
+                    aria-current={selected || undefined}
+                    onClick={() => props.snapcontrol.setStream(props.group.id, option.id)}
+                  >
+                    <span className={'stream-menu-icon' + (playing ? ' playing' : '')} aria-hidden="true">
+                      <Radio size={14} />
+                    </span>
+                    <span className="flex-grow-1 overflow-hidden">
+                      <span className="d-block text-truncate">{option.id}</span>
+                      <span className="stream-menu-status">{playing ? 'Playing' : 'Idle'}</span>
+                    </span>
+                    {selected && <Check size={16} className="flex-shrink-0" aria-hidden="true" />}
+                  </Dropdown.Item>
+                );
+              })}
+            </Dropdown.Menu>
+          </Dropdown>
         </div>
 
         {metadata ? (

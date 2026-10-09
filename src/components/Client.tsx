@@ -32,7 +32,6 @@ export default function Client(props: ClientProps) {
       <div className="d-flex align-items-center gap-2">
         <span className="client-avatar" aria-hidden="true">
           <Speaker size={16} />
-          <span className={'status-dot' + (client.connected ? ' online' : '')} />
         </span>
         <span className="client-name text-truncate">{displayName}</span>
         {!client.connected && (
