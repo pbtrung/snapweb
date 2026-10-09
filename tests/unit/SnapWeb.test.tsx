@@ -149,9 +149,14 @@ describe('SnapWeb', () => {
       user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     });
 
+    // Deletes from the Clients tab of the settings, and closes them
     async function deleteClient(name: string) {
-      await user.click(screen.getByRole('button', { name: 'Settings for ' + name }));
-      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Open settings' }));
+      await user.click(screen.getByRole('tab', { name: 'Clients' }));
+      await user.click(screen.getByRole('button', { name: name }));
+      await user.click(within(screen.getByRole('group', { name: name })).getByRole('button', { name: 'Delete' }));
+      expect(screen.queryByRole('group', { name: name })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
     }
 
     function deleteRequests(ws: FakeWebSocket) {
@@ -164,7 +169,7 @@ describe('SnapWeb', () => {
       await deleteClient('host-c3');
 
       expect(screen.getByText('Deleted host-c3')).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Settings for host-c3' })).not.toBeInTheDocument();
+      expect(screen.queryByText('host-c3')).not.toBeInTheDocument();
       expect(deleteRequests(ws)).toEqual([]);
     });
 
@@ -174,7 +179,7 @@ describe('SnapWeb', () => {
       await deleteClient('host-c3');
       await user.click(screen.getByRole('button', { name: 'Undo' }));
 
-      expect(screen.getByRole('button', { name: 'Settings for host-c3' })).toBeInTheDocument();
+      expect(screen.getByText('host-c3')).toBeInTheDocument();
       act(() => {
         vi.advanceTimersByTime(10000);
       });
@@ -216,7 +221,7 @@ describe('SnapWeb', () => {
       });
       act(() => ws.receive({ jsonrpc: '2.0', method: 'Server.OnUpdate', params: { server: makeServerStatus() } }));
 
-      expect(screen.queryByRole('button', { name: 'Settings for host-c3' })).not.toBeInTheDocument();
+      expect(screen.queryByText('host-c3')).not.toBeInTheDocument();
       act(() => {
         vi.advanceTimersByTime(3100);
       });

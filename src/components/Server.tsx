@@ -7,7 +7,6 @@ type ServerProps = {
   snapcontrol: SnapControl;
   showOffline: boolean;
   deletedClientIds: string[];
-  onClientDelete: (client: Snapcast.Client) => void;
 };
 
 export default function Server(props: ServerProps) {
@@ -27,7 +26,6 @@ export default function Server(props: ServerProps) {
           snapcontrol={props.snapcontrol}
           showOffline={props.showOffline}
           deletedClientIds={props.deletedClientIds}
-          onClientDelete={props.onClientDelete}
         />
       ))}
       {groups.length > 0 && !hasClients && (

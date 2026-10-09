@@ -1,21 +1,19 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Group from '../../src/components/Group';
 import { connectedControl, quietConsole, requests } from '../helpers/snapControl';
 import { makeServerStatus } from '../fixtures/serverStatus';
 import type { FakeWebSocket } from '../helpers/fakeWebSocket';
-import type { SnapControl, Snapcast } from '../../src/snapcontrol';
+import type { SnapControl } from '../../src/snapcontrol';
 
 describe('Group', () => {
   let control: SnapControl;
   let ws: FakeWebSocket;
-  let onClientDelete: Mock<(client: Snapcast.Client) => void>;
 
   beforeEach(() => {
     quietConsole();
     ({ control, ws } = connectedControl());
-    onClientDelete = vi.fn();
   });
 
   function renderGroup(id: string, showOffline = false, deletedClientIds: string[] = []) {
@@ -26,7 +24,6 @@ describe('Group', () => {
         snapcontrol={control}
         showOffline={showOffline}
         deletedClientIds={deletedClientIds}
-        onClientDelete={onClientDelete}
       />,
     );
   }
@@ -214,75 +211,7 @@ describe('Group', () => {
     });
   });
 
-  describe('settings dialog', () => {
-    async function openSettings() {
-      await userEvent.click(screen.getByRole('button', { name: 'Settings for group' }));
-      return screen.getByRole('dialog');
-    }
-
-    it('lists every client with its membership', async () => {
-      renderGroup('g1');
-      const dialog = await openSettings();
-
-      expect(within(dialog).getByRole('checkbox', { name: 'Kitchen' })).toBeChecked();
-      expect(within(dialog).getByRole('checkbox', { name: 'livingroom' })).toBeChecked();
-      expect(within(dialog).getByRole('checkbox', { name: 'host-c3' })).not.toBeChecked();
-    });
-
-    it('sets the group clients on OK', async () => {
-      renderGroup('g1');
-      const dialog = await openSettings();
-      await userEvent.click(within(dialog).getByRole('checkbox', { name: 'host-c3' }));
-      await userEvent.click(within(dialog).getByRole('checkbox', { name: 'livingroom' }));
-      expect(within(dialog).getByRole('checkbox', { name: 'host-c3' })).toBeChecked();
-      expect(within(dialog).getByRole('checkbox', { name: 'livingroom' })).not.toBeChecked();
-
-      await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
-      expect(requests(ws, 'Group.SetClients')).toEqual([
-        expect.objectContaining({ params: { id: 'g1', clients: ['c1', 'c3'] } }),
-      ]);
-      expect(requests(ws, 'Group.SetStream')).toHaveLength(0);
-    });
-
-    it('does not send anything when nothing changed', async () => {
-      renderGroup('g1');
-      const dialog = await openSettings();
-      await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
-
-      expect(ws.sent).toHaveLength(0);
-    });
-
-    it('changes the stream on OK', async () => {
-      renderGroup('g1');
-      const dialog = await openSettings();
-      await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'Stream' }), 's2');
-      await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
-
-      expect(requests(ws, 'Group.SetStream')).toEqual([
-        expect.objectContaining({ params: { id: 'g1', stream_id: 's2' } }),
-      ]);
-    });
-
-    it('discards changes on Cancel', async () => {
-      renderGroup('g1');
-      const dialog = await openSettings();
-      await userEvent.click(within(dialog).getByRole('checkbox', { name: 'host-c3' }));
-      await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-
-      expect(ws.sent).toHaveLength(0);
-    });
-  });
-
-  describe('deleting a client', () => {
-    it('reports a delete from the client settings', async () => {
-      renderGroup('g2', true);
-      await userEvent.click(screen.getByRole('button', { name: 'Settings for host-c3' }));
-      await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
-
-      expect(onClientDelete).toHaveBeenCalledWith(control.getClient('c3'));
-      expect(requests(ws, 'Server.DeleteClient')).toHaveLength(0);
-    });
-
+  describe('deleted clients', () => {
     it('hides clients waiting to be deleted', () => {
       renderGroup('g1', false, ['c1']);
       expect(screen.queryByText('Kitchen')).not.toBeInTheDocument();

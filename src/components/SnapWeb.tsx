@@ -234,7 +234,6 @@ export default function SnapWeb() {
         snapcontrol={snapControl}
         showOffline={showOffline}
         deletedClientIds={deletedClients.map(({ id }) => id)}
-        onClientDelete={handleClientDelete}
       />
       {(deletedClients.length > 0 || !isConnected || (authRequired && !loginOpen)) && (
         <div className="notice-stack">
@@ -256,10 +255,15 @@ export default function SnapWeb() {
           onCancel={() => setLoginOpen(false)}
         />
       )}
-      {/* Mounted only while open, so it starts from the saved settings each time */}
+      {/* Mounted only while open, so it starts from the saved settings and
+          the current server state each time */}
       {settingsOpen && (
         <SettingsDialog
           open
+          server={server}
+          snapcontrol={snapControl}
+          deletedClientIds={deletedClients.map(({ id }) => id)}
+          onClientDelete={handleClientDelete}
           loggedIn={snapControl.loggedIn}
           onLogout={() => {
             setSettingsOpen(false);

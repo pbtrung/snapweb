@@ -7,15 +7,7 @@ describe('Server', () => {
   it('renders a card per group with online clients', () => {
     quietConsole();
     const { control } = connectedControl();
-    render(
-      <Server
-        server={control.server}
-        snapcontrol={control}
-        showOffline={false}
-        deletedClientIds={[]}
-        onClientDelete={() => {}}
-      />,
-    );
+    render(<Server server={control.server} snapcontrol={control} showOffline={false} deletedClientIds={[]} />);
 
     expect(screen.getByText('Kitchen')).toBeInTheDocument();
     expect(screen.queryByText('host-c3')).not.toBeInTheDocument();
@@ -24,15 +16,7 @@ describe('Server', () => {
   it('includes offline clients when asked to', () => {
     quietConsole();
     const { control } = connectedControl();
-    render(
-      <Server
-        server={control.server}
-        snapcontrol={control}
-        showOffline
-        deletedClientIds={[]}
-        onClientDelete={() => {}}
-      />,
-    );
+    render(<Server server={control.server} snapcontrol={control} showOffline deletedClientIds={[]} />);
 
     expect(screen.getByText('host-c3')).toBeInTheDocument();
   });
@@ -40,15 +24,7 @@ describe('Server', () => {
   it('hides clients waiting to be deleted', () => {
     quietConsole();
     const { control } = connectedControl();
-    render(
-      <Server
-        server={control.server}
-        snapcontrol={control}
-        showOffline
-        deletedClientIds={['c3']}
-        onClientDelete={() => {}}
-      />,
-    );
+    render(<Server server={control.server} snapcontrol={control} showOffline deletedClientIds={['c3']} />);
 
     expect(screen.queryByText('host-c3')).not.toBeInTheDocument();
     expect(screen.getByText('Kitchen')).toBeInTheDocument();

@@ -490,3 +490,25 @@ legend.section-label + * {
   margin: 0;
   box-shadow: 0 8px 24px rgba(16, 24, 40, 0.16);
 }
+
+/* Settings tabs and the client list in them */
+
+.settings-tabs {
+  margin-bottom: 1rem;
+}
+
+.client-accordion {
+  --bs-accordion-bg: transparent;
+  --bs-accordion-border-radius: var(--sw-radius-sm);
+  --bs-accordion-inner-border-radius: calc(var(--sw-radius-sm) - 1px);
+  --bs-accordion-btn-padding-y: 0.75rem;
+  --bs-accordion-active-bg: var(--bs-tertiary-bg);
+  --bs-accordion-active-color: var(--bs-emphasis-color);
+  --bs-accordion-btn-focus-box-shadow: 0 0 0 0.25rem var(--bs-focus-ring-color);
+  margin-bottom: 0.25rem;
+}
+
+.client-accordion .accordion-button {
+  min-width: 0;
+  font-weight: 500;
+}

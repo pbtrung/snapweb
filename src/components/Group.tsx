@@ -1,16 +1,9 @@
 import { useRef, useState } from 'react';
 import { Form } from 'react-bootstrap';
-import { Clock, FolderOpen, Pause, Play, Settings2, SkipBack, SkipForward } from 'lucide-react';
+import { Clock, FolderOpen, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
-import Dialog, { DialogSection } from './Dialog';
 import VolumeControl from './VolumeControl';
 import { SnapControl, Snapcast } from '../snapcontrol';
-
-type GroupClient = {
-  client: Snapcast.Client;
-  inGroup: boolean;
-  wasInGroup: boolean;
-};
 
 type GroupProps = {
   server: Snapcast.Server;
@@ -19,7 +12,6 @@ type GroupProps = {
   showOffline: boolean;
   // Clients waiting for their delete to be undone or carried out, hidden here
   deletedClientIds: string[];
-  onClientDelete: (client: Snapcast.Client) => void;
 };
 
 // Client volumes at the start of a group volume drag, which the drag scales from
@@ -48,9 +40,6 @@ function formatDuration(seconds: number): string {
 
 export default function Group(props: GroupProps) {
   const [, setUpdate] = useState(0);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsClients, setSettingsClients] = useState<GroupClient[]>([]);
-  const [settingsStreamId, setSettingsStreamId] = useState('');
   // Cover art that failed to load, which is hidden like a missing one
   const [brokenArtUrl, setBrokenArtUrl] = useState('');
   const volumeDrag = useRef<VolumeDrag | null>(null);
@@ -71,37 +60,6 @@ export default function Group(props: GroupProps) {
     // Avoid a NaN volume for groups without (online) clients
     if (clients.length === 0) return 0;
     return clients.reduce((sum, client) => sum + client.config.volume.percent, 0) / clients.length;
-  }
-
-  function handleSettingsClicked() {
-    setSettingsClients(
-      props.server.groups.flatMap((group) =>
-        group.clients.map((client) => {
-          const inGroup = props.group.clients.includes(client);
-          return { client, inGroup, wasInGroup: inGroup };
-        }),
-      ),
-    );
-    setSettingsStreamId(props.group.stream_id);
-    setSettingsOpen(true);
-  }
-
-  function handleSettingsClose(apply: boolean) {
-    if (apply) {
-      if (settingsClients.some((element) => element.inGroup !== element.wasInGroup))
-        props.snapcontrol.setClients(
-          props.group.id,
-          settingsClients.filter((element) => element.inGroup).map((element) => element.client.id),
-        );
-      if (props.group.stream_id !== settingsStreamId) props.snapcontrol.setStream(props.group.id, settingsStreamId);
-    }
-    setSettingsOpen(false);
-  }
-
-  function handleGroupClientChange(client: Snapcast.Client, inGroup: boolean) {
-    setSettingsClients(
-      settingsClients.map((element) => (element.client === client ? { ...element, inGroup } : element)),
-    );
   }
 
   function handleMuteClicked() {
@@ -141,7 +99,6 @@ export default function Group(props: GroupProps) {
   const artist = metadata?.artist ? metadata.artist.join(', ') : 'Unknown Artist';
   const hasDuration = metadata?.duration !== undefined && metadata.duration > 0;
   const isPlaying = stream?.properties.playbackStatus === 'playing';
-  const idPrefix = 'group-' + props.group.id;
 
   return (
     <section className="card group-card">
@@ -189,14 +146,6 @@ export default function Group(props: GroupProps) {
               </button>
             </div>
           )}
-          <button
-            type="button"
-            className="btn btn-ghost btn-icon"
-            aria-label={'Settings for ' + groupName}
-            onClick={handleSettingsClicked}
-          >
-            <Settings2 size={20} />
-          </button>
         </div>
 
         {metadata && (
@@ -256,51 +205,9 @@ export default function Group(props: GroupProps) {
 
       <ul className="list-group list-group-flush border-top">
         {clients.map((client) => (
-          <Client
-            key={client.id}
-            client={client}
-            snapcontrol={props.snapcontrol}
-            onDelete={() => props.onClientDelete(client)}
-            onVolumeChange={refresh}
-          />
+          <Client key={client.id} client={client} snapcontrol={props.snapcontrol} onVolumeChange={refresh} />
         ))}
       </ul>
-
-      <Dialog show={settingsOpen} id={idPrefix} title="Group settings" icon={Settings2} onClose={handleSettingsClose}>
-        <DialogSection title="Stream">
-          <Form.Group controlId={idPrefix + '-stream'}>
-            <Form.Label visuallyHidden>Stream</Form.Label>
-            <Form.Select value={settingsStreamId} onChange={(event) => setSettingsStreamId(event.target.value)}>
-              {props.server.streams.map((stream) => (
-                <option key={stream.id} value={stream.id}>
-                  {stream.id}
-                </option>
-              ))}
-            </Form.Select>
-          </Form.Group>
-        </DialogSection>
-        <DialogSection title="Clients">
-          <div className="list-group check-list">
-            {settingsClients.map((element) => (
-              <label key={element.client.id} className="list-group-item d-flex align-items-center gap-3">
-                <input
-                  className="form-check-input m-0 flex-shrink-0"
-                  type="checkbox"
-                  checked={element.inGroup}
-                  onChange={(event) => handleGroupClientChange(element.client, event.target.checked)}
-                />
-                <span className="text-truncate">{element.client.getName()}</span>
-                {!element.client.connected && (
-                  // Hidden from the checkbox's name, which is the client name
-                  <span className="badge rounded-pill text-bg-secondary fw-normal ms-auto" aria-hidden="true">
-                    offline
-                  </span>
-                )}
-              </label>
-            ))}
-          </div>
-        </DialogSection>
-      </Dialog>
     </section>
   );
 }
