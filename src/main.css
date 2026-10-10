@@ -444,7 +444,7 @@ body {
   padding: 0.5rem 0 0;
 }
 
-/* Inline, so it is centered with the title on narrow screens */
+/* Inline, so it only takes the width of its contents */
 .track-meta {
   display: inline-grid;
   max-width: 100%;

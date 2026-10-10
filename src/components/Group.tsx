@@ -175,7 +175,7 @@ export default function Group(props: GroupProps) {
         {metadata ? (
           <div className="now-playing mt-3">
             <div className="d-flex flex-column flex-sm-row align-items-center gap-3">
-              <div className="flex-grow-1 overflow-hidden align-self-stretch align-self-sm-auto text-center text-sm-start">
+              <div className="flex-grow-1 overflow-hidden align-self-stretch align-self-sm-auto text-start">
                 <div className="track-title text-truncate">{title}</div>
                 <div className="text-body-secondary text-truncate">{artist}</div>
                 {(hasDuration || metadata.url) && (
