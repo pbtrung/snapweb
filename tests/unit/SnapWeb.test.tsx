@@ -206,6 +206,21 @@ describe('SnapWeb', () => {
       expect(screen.queryByText('Deleted host-c3')).not.toBeInTheDocument();
     });
 
+    it('keeps the client out of the settings once deleted while they are open', async () => {
+      render(<SnapWeb />);
+      const ws = connect();
+      await user.click(screen.getByRole('button', { name: 'Open settings' }));
+      await user.click(screen.getByRole('tab', { name: 'Clients' }));
+      await user.click(screen.getByRole('button', { name: 'host-c3' }));
+      await user.click(within(screen.getByRole('group', { name: 'host-c3' })).getByRole('button', { name: 'Delete' }));
+      act(() => {
+        vi.advanceTimersByTime(6100);
+      });
+
+      expect(deleteRequests(ws)).toEqual([{ id: 'c3' }]);
+      expect(screen.queryByRole('button', { name: 'host-c3' })).not.toBeInTheDocument();
+    });
+
     it('does not delete on Escape, which may be meant for a dialog', async () => {
       render(<SnapWeb />);
       const ws = connect();

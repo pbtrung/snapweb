@@ -89,7 +89,11 @@ export default function SettingsDialog(props: SettingsDialogProps) {
     ),
   );
 
-  const visibleClients = clients.filter((client) => !props.deletedClientIds.includes(client.id));
+  // Hides pending deletes, and clients deleted from the model since the
+  // dialog was opened, which the snapshot above still holds
+  const visibleClients = clients.filter(
+    (client) => !props.deletedClientIds.includes(client.id) && props.server.getClient(client.id) !== null,
+  );
 
   // A client may have been deleted from the model while the dialog was open
   function exists(clientId: string): boolean {
