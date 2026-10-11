@@ -46,7 +46,7 @@ version in one step:
 
 ```bash
 ./update-snapweb.sh            # the latest release
-./update-snapweb.sh v0.999.1   # a specific tag
+./update-snapweb.sh v0.99.1    # a specific tag
 FORCE=1 ./update-snapweb.sh    # reinstall even if up to date
 SNAPWEB_DIR=/usr/share/snapserver/snapweb ./update-snapweb.sh
 ```
