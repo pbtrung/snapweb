@@ -625,6 +625,8 @@ body {
 }
 
 .settings-dialog .modal-footer {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
   border-top: 1px solid var(--bs-border-color-translucent);
 }
 
