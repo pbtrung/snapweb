@@ -1,5 +1,6 @@
 import Flac from 'libflacjs/dist/libflac.js';
 import { getClientId } from './config.ts';
+import { TimeProvider } from './timeProvider.ts';
 import {
   AudioContext,
   IAudioBuffer,
@@ -34,8 +35,6 @@ const FLAC_DECODER_END_OF_STREAM = 4;
 const SYNC_INTERVAL_MS = 1000;
 const SYNC_BURST_COUNT = 10; // requests sent right after the audio clock starts
 const SYNC_BURST_SPACING_MS = 25;
-const SYNC_WINDOW = 100; // offsets the median is taken over
-const SYNC_MIN_SAMPLES = 3; // enough for the median to ignore one outlier
 
 // Audio clock: offsets are sampled once per buffer
 const CLOCK_WINDOW = 25; // offsets the median is taken over, about 2 s
@@ -490,56 +489,6 @@ class AudioStream {
     buffer.getChannelData(0).set(left);
     buffer.getChannelData(1).set(right);
   }
-}
-
-// Syncs the performance clock to the server clock. The performance clock
-// keeps running when audio output stalls, unlike the audio clock, so the
-// offset stays valid; AudioClock maps audio time onto it.
-class TimeProvider {
-  reset() {
-    this.diffBuffer.length = 0;
-    this.diff = 0;
-    // Replies to requests sent before now may be from another server
-    this.pendingRequests.clear();
-  }
-
-  // Remember a time request, so only its reply is used for this clock
-  trackRequest(id: number) {
-    if (this.pendingRequests.size > SYNC_WINDOW) this.pendingRequests.clear();
-    this.pendingRequests.add(id & 0xffff);
-  }
-
-  // Use a time reply if it answers a request sent on the current clock
-  handleReply(refersTo: number, c2s: number, s2c: number): boolean {
-    if (!this.pendingRequests.delete(refersTo)) return false;
-    this.setDiff(c2s, s2c);
-    return true;
-  }
-
-  isSynced(): boolean {
-    return this.diffBuffer.length >= SYNC_MIN_SAMPLES;
-  }
-
-  setDiff(c2s: number, s2c: number) {
-    if (this.diffBuffer.push((c2s - s2c) / 2) > SYNC_WINDOW) this.diffBuffer.shift();
-    this.diff = median(this.diffBuffer);
-  }
-
-  now() {
-    return window.performance.now();
-  }
-
-  serverNow() {
-    return this.serverTime(this.now());
-  }
-
-  serverTime(localTimeMs: number) {
-    return localTimeMs + this.diff;
-  }
-
-  diffBuffer: Array<number> = new Array<number>();
-  diff: number = 0;
-  pendingRequests: Set<number> = new Set<number>();
 }
 
 // Maps audio context time, which buffers are scheduled on, to the
@@ -1038,10 +987,12 @@ class SnapStream {
   }
 
   private handleTime(time: TimeMessage) {
+    const now = this.timeProvider.now();
     this.timeProvider.handleReply(
       time.refersTo,
       time.latency.getMilliseconds(),
-      this.timeProvider.now() - time.sent.getMilliseconds(),
+      now - time.sent.getMilliseconds(),
+      now,
     );
   }
 
