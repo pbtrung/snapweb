@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { Alert, Button, Spinner } from 'react-bootstrap';
 import { Play, Settings, Square } from 'lucide-react';
 import Server from './Server';
@@ -64,7 +64,8 @@ export default function SnapWeb() {
   const prefersDarkMode = useSyncExternalStore(subscribeToColorScheme, prefersDarkColorScheme);
   const colorScheme = theme == Theme.Dark || (theme == Theme.System && prefersDarkMode) ? 'dark' : 'light';
 
-  useEffect(() => {
+  // Before paint, so a theme change doesn't show a frame in the old colors
+  useLayoutEffect(() => {
     document.documentElement.setAttribute('data-bs-theme', colorScheme);
   }, [colorScheme]);
 

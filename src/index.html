@@ -10,6 +10,18 @@
     <meta name="author" content="Johannes M. Pohl" />
     <meta name="description" content="Snapcast web client" />
     <title>Snapweb</title>
+    <script>
+      // Sets the saved theme before the first paint, so a dark page doesn't
+      // flash light while the app loads. SnapWeb keeps it up to date after.
+      (function () {
+        var theme;
+        try {
+          theme = localStorage.getItem('theme');
+        } catch (e) {}
+        var dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-bs-theme', dark ? 'dark' : 'light');
+      })();
+    </script>
   </head>
 
   <body>
