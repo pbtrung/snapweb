@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { SnapControl, Snapcast, base64, needsLogin } from '../../src/snapcontrol';
+import { SnapControl, Snapcast, averageVolume, base64, needsLogin } from '../../src/snapcontrol';
 import { authToken } from '../../src/config';
 import { FakeWebSocket } from '../helpers/fakeWebSocket';
 import { quietConsole, requests } from '../helpers/snapControl';
@@ -73,6 +73,16 @@ describe('Snapcast model', () => {
     expect(stream.properties.canControl).toBe(false);
     expect(stream.properties.canPlay).toBe(false);
     expect(stream.properties.metadata).toBeUndefined();
+  });
+
+  it('names a track, falling back for a missing title or artist', () => {
+    const metadata = new Snapcast.Metadata({ title: 'Song', artist: ['A', 'B'] });
+    expect(metadata.getTitle()).toBe('Song');
+    expect(metadata.getArtist()).toBe('A, B');
+
+    const empty = new Snapcast.Metadata({ title: '', artist: [] });
+    expect(empty.getTitle()).toBe('Unknown Title');
+    expect(empty.getArtist()).toBe('Unknown Artist');
   });
 
   it('replaces groups and streams when re-parsed', () => {
@@ -351,28 +361,16 @@ describe('SnapControl', () => {
       expect(() => control.getStream('x')).toThrow('stream x was null');
     });
 
-    it('resolves the group and stream of a client', () => {
+    it('resolves the group of a client', () => {
       expect(control.getGroupFromClient('c3').id).toBe('g2');
-      expect(control.getStreamFromClient('c1').id).toBe('s1');
       expect(() => control.getGroupFromClient('x')).toThrow('group for client x was null');
     });
 
-    it('averages the group volume', () => {
+    it('averages client volumes', () => {
       const g1 = control.getGroup('g1');
-      expect(control.getGroupVolume(g1, false)).toBe(60);
-
-      control.getClient('c2').connected = false;
-      expect(control.getGroupVolume(g1, true)).toBe(40);
-
-      control.getClient('c1').connected = false;
-      expect(control.getGroupVolume(g1, true)).toBe(0);
-
-      expect(
-        control.getGroupVolume(
-          new Snapcast.Group({ id: 'empty', name: '', stream_id: 's1', muted: false, clients: [] }),
-          false,
-        ),
-      ).toBe(0);
+      expect(averageVolume(g1.clients)).toBe(60);
+      expect(averageVolume([control.getClient('c1')])).toBe(40);
+      expect(averageVolume([])).toBe(0);
     });
   });
 
@@ -578,6 +576,17 @@ describe('SnapControl', () => {
       expect(control.getGroup('g1').muted).toBe(true);
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('Client.OnDisconnect'));
+    });
+
+    it('refetches the status after a notification it cannot apply', () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      ws.sent = [];
+      notify('Client.OnConnect', { id: 'new', client: makeClient('new') });
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(0);
+
+      vi.advanceTimersByTime(1000);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(1);
     });
 
     it('ignores messages from a connection after disconnecting', () => {

@@ -3,7 +3,8 @@ import { Dropdown } from 'react-bootstrap';
 import { AudioLines, Clock, FolderOpen, Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-react';
 import Client from './Client';
 import VolumeControl from './VolumeControl';
-import { SnapControl, Snapcast } from '../snapcontrol';
+import { SnapControl, Snapcast, averageVolume } from '../snapcontrol';
+import { visibleClients } from './visibleClients';
 
 type GroupProps = {
   server: Snapcast.Server;
@@ -47,18 +48,7 @@ export default function Group(props: GroupProps) {
     setUpdate((u) => u + 1);
   }
 
-  function getClients(): Snapcast.Client[] {
-    return props.group.clients.filter(
-      (client) => (client.connected || props.showOffline) && !props.deletedClientIds.includes(client.id),
-    );
-  }
-
-  function getVolume(): number {
-    const clients = getClients();
-    // Avoid a NaN volume for groups without (online) clients
-    if (clients.length === 0) return 0;
-    return clients.reduce((sum, client) => sum + client.config.volume.percent, 0) / clients.length;
-  }
+  const clients = visibleClients(props.group, props.showOffline, props.deletedClientIds);
 
   function handleMuteClicked() {
     props.snapcontrol.muteGroup(props.group.id, !props.group.muted);
@@ -66,15 +56,12 @@ export default function Group(props: GroupProps) {
   }
 
   function handleVolumeChange(value: number) {
-    if (volumeDrag.current === null) {
-      const clients = getClients();
-      volumeDrag.current = {
-        clientVolumes: new Map(clients.map((client) => [client.id, client.config.volume.percent])),
-        groupVolume: getVolume(),
-      };
-    }
+    volumeDrag.current ??= {
+      clientVolumes: new Map(clients.map((client) => [client.id, client.config.volume.percent])),
+      groupVolume: averageVolume(clients),
+    };
     const drag = volumeDrag.current;
-    for (const client of getClients()) {
+    for (const client of clients) {
       // A client that appeared during the drag keeps its volume
       const startVolume = drag.clientVolumes.get(client.id);
       if (startVolume === undefined) continue;
@@ -87,14 +74,11 @@ export default function Group(props: GroupProps) {
     props.snapcontrol.control(stream.id, stream.properties.playbackStatus === 'playing' ? 'pause' : 'play');
   }
 
-  const clients = getClients();
   if (clients.length === 0) return null;
 
   const groupName = props.group.name || 'group';
   const stream = props.server.getStream(props.group.stream_id);
   const metadata = stream?.properties.metadata;
-  const title = metadata?.title || 'Unknown Title';
-  const artist = metadata?.artist ? metadata.artist.join(', ') : 'Unknown Artist';
   const hasDuration = metadata?.duration !== undefined && metadata.duration > 0;
   const isPlaying = stream?.properties.playbackStatus === 'playing';
   // A stream without playback control still reports whether audio is coming in
@@ -176,8 +160,8 @@ export default function Group(props: GroupProps) {
           <div className="now-playing mt-3">
             <div className="d-flex flex-column flex-sm-row align-items-center gap-3">
               <div className="flex-grow-1 overflow-hidden align-self-stretch align-self-sm-auto text-start">
-                <div className="track-title text-truncate">{title}</div>
-                <div className="text-body-secondary text-truncate">{artist}</div>
+                <div className="track-title text-truncate">{metadata.getTitle()}</div>
+                <div className="text-body-secondary text-truncate">{metadata.getArtist()}</div>
                 {(hasDuration || metadata.url) && (
                   <dl className="track-meta small text-body-secondary mb-0 mt-1">
                     {hasDuration && (
@@ -211,7 +195,7 @@ export default function Group(props: GroupProps) {
             <div className="section-label mb-0 ps-1">Group volume</div>
             <VolumeControl
               label={groupName}
-              volume={getVolume()}
+              volume={averageVolume(clients)}
               muted={props.group.muted}
               onMuteClick={handleMuteClicked}
               onChange={handleVolumeChange}

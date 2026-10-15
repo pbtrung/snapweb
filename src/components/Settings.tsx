@@ -89,25 +89,25 @@ export default function SettingsDialog(props: SettingsDialogProps) {
     ),
   );
 
+  // A client or group may have left the model while the dialog was open,
+  // e.g. deleted or regrouped elsewhere, or replaced on a reconnect
+  function exists(clientId: string): boolean {
+    return props.snapcontrol.server.getClient(clientId) !== null;
+  }
+
+  function groupExists(groupId: string): boolean {
+    return props.snapcontrol.server.getGroup(groupId) !== null;
+  }
+
   // Hides pending deletes, and clients deleted from the model since the
   // dialog was opened, which the snapshot above still holds
   const visibleClients = clients.filter(
     (client) => !props.deletedClientIds.includes(client.id) && props.server.getClient(client.id) !== null,
   );
 
-  // A client may have been deleted from the model while the dialog was open
-  function exists(clientId: string): boolean {
-    try {
-      props.snapcontrol.getClient(clientId);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   function applyGroups() {
     for (const group of groups) {
-      if (streamIds[group.id] !== initialStreamIds[group.id])
+      if (streamIds[group.id] !== initialStreamIds[group.id] && groupExists(group.id))
         props.snapcontrol.setStream(group.id, streamIds[group.id]);
     }
     // Adding a client to a group takes it out of its old group, so a group
@@ -120,7 +120,7 @@ export default function SettingsDialog(props: SettingsDialogProps) {
       const takenOut = clients.some(
         (client) => initialGroupIds[client.id] === group.id && groupIds[client.id] === null && exists(client.id),
       );
-      return gains || takenOut ? [{ group, members, gains }] : [];
+      return (gains || takenOut) && groupExists(group.id) ? [{ group, members, gains }] : [];
     });
     requests.sort((a, b) => Number(b.gains) - Number(a.gains));
     for (const { group, members } of requests)

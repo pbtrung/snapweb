@@ -10,7 +10,7 @@ import { SnapControl, Snapcast } from '../snapcontrol';
 import type { SnapStream } from '../snapstream';
 import logo from '../assets/logo192.png';
 import silence from '../assets/10-seconds-of-silence.mp3';
-import { updateMediaSession } from '../mediaSession';
+import { clearMediaSession, updateMediaSession } from '../mediaSession';
 
 const darkQuery = '(prefers-color-scheme: dark)';
 
@@ -26,7 +26,7 @@ function prefersDarkColorScheme() {
 
 export default function SnapWeb() {
   const [, setUpdate] = useState(0);
-  const [server, setServer] = useState(new Snapcast.Server());
+  const [server, setServer] = useState(() => new Snapcast.Server());
   const [showOffline, setShowOffline] = useState(config.showOffline);
   const [theme, setTheme] = useState(config.theme);
   const [serverUrl, setServerUrl] = useState(config.baseUrl);
@@ -42,11 +42,14 @@ export default function SnapWeb() {
   // group being re-rendered, emptied or replaced by a server update
   const [deletedClients, setDeletedClients] = useState<{ id: string; name: string }[]>([]);
   const snapstreamRef = useRef<SnapStream | null>(null);
-  const audioRef = useRef(new Audio());
+  // Created on first use, rather than on every render
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const getAudio = () => (audioRef.current ??= new Audio());
   const handlersRef = useRef<{
     onChange: (server: Snapcast.Server) => void;
     onConnectionChanged: (connected: boolean, error?: string) => void;
     onAuthRequired: (required: boolean) => void;
+    refreshMediaSession: () => void;
   } | null>(null);
   const [snapControl] = useState(() => {
     const control = new SnapControl();
@@ -78,17 +81,23 @@ export default function SnapWeb() {
     }
   }
 
+  // Only while playing, so the platform's media controls stand for this
+  // device's playback
+  function refreshMediaSession() {
+    if (!snapstreamRef.current) return;
+    try {
+      updateMediaSession(snapControl, getMyStreamId(), getAudio());
+    } catch (e) {
+      console.debug('Failed to update the media session: ' + e);
+    }
+  }
+
   function handleChange(snapserver: Snapcast.Server) {
     setServer(snapserver);
     // The model is updated in place, so a new render is needed even when
     // snapserver is the same object as before
     setUpdate((u) => u + 1);
-    if (!snapstreamRef.current) return;
-    try {
-      updateMediaSession(snapControl, getMyStreamId(), audioRef.current);
-    } catch (e) {
-      console.debug('Failed to update the media session: ' + e);
-    }
+    refreshMediaSession();
   }
 
   function handleConnectionChanged(connected: boolean, error?: string) {
@@ -118,16 +127,18 @@ export default function SnapWeb() {
       onChange: handleChange,
       onConnectionChanged: handleConnectionChanged,
       onAuthRequired: handleAuthRequired,
+      refreshMediaSession,
     };
   });
 
   useEffect(() => {
-    const audio = audioRef.current;
+    const audio = getAudio();
     if (!isPlaying) {
       snapstreamRef.current?.stop();
       snapstreamRef.current = null;
       audio.pause();
       audio.src = '';
+      clearMediaSession();
       return;
     }
     // Looping silence keeps the page's media session alive while playing
@@ -138,7 +149,10 @@ export default function SnapWeb() {
     let cancelled = false;
     Promise.all([audio.play(), import('../snapstream')])
       .then(([, { SnapStream }]) => {
-        if (!cancelled) snapstreamRef.current = new SnapStream(config.baseUrl);
+        if (cancelled) return;
+        snapstreamRef.current = new SnapStream(config.baseUrl);
+        // Rather than waiting for the next server change
+        handlersRef.current?.refreshMediaSession();
       })
       .catch((e) => {
         // e.g. the browser's autoplay policy rejected play()
@@ -160,6 +174,8 @@ export default function SnapWeb() {
     if (!undo) snapControl.deleteClient(clientId);
     setDeletedClients((clients) => clients.filter(({ id }) => id !== clientId));
   }
+
+  const deletedClientIds = deletedClients.map(({ id }) => id);
 
   // The connection and login notices are hidden while the settings are
   // open, where they would cover the dialog's buttons
@@ -235,12 +251,7 @@ export default function SnapWeb() {
           </div>
         </nav>
       </header>
-      <Server
-        server={server}
-        snapcontrol={snapControl}
-        showOffline={showOffline}
-        deletedClientIds={deletedClients.map(({ id }) => id)}
-      />
+      <Server server={server} snapcontrol={snapControl} showOffline={showOffline} deletedClientIds={deletedClientIds} />
       {(deletedClients.length > 0 || showConnectionAlert || showLoginAlert) && (
         <div className="notice-stack">
           {deletedClients.map(({ id, name }) => (
@@ -268,7 +279,7 @@ export default function SnapWeb() {
           open
           server={server}
           snapcontrol={snapControl}
-          deletedClientIds={deletedClients.map(({ id }) => id)}
+          deletedClientIds={deletedClientIds}
           onClientDelete={handleClientDelete}
           onThemeChange={setTheme}
           loggedIn={snapControl.loggedIn}

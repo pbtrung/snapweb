@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { SnapControl } from '../../src/snapcontrol';
+import { SnapControl, averageVolume } from '../../src/snapcontrol';
 import { allClients, connect, fetchStatus, pickClient, pickGroup, serverUrl, waitFor } from './helpers';
 
 // Every test restores what it changes. Clients and groups are picked offline
@@ -44,7 +44,7 @@ describe.skipIf(!serverUrl)('SnapControl against ' + (serverUrl || 'a real Snaps
 
     it('computes group volumes in range', () => {
       for (const group of actor.server.groups) {
-        const volume = actor.getGroupVolume(group, false);
+        const volume = averageVolume(group.clients);
         expect(volume).toBeGreaterThanOrEqual(0);
         expect(volume).toBeLessThanOrEqual(100);
       }

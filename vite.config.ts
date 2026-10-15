@@ -8,7 +8,7 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
   version: string;
 };
 
-// Shown in the Settings dialog and sent to Snapserver in the Hello message;
+// Shown in the app header and sent to Snapserver in the Hello message;
 // vitest.config.ts uses it too
 export const define = {
   'import.meta.env.VITE_APP_NAME': JSON.stringify(pkg.name),

@@ -1,6 +1,7 @@
 import { Speaker } from 'lucide-react';
 import Group from './Group';
 import { SnapControl, Snapcast } from '../snapcontrol';
+import { visibleClients } from './visibleClients';
 
 type ServerProps = {
   server: Snapcast.Server;
@@ -11,10 +12,8 @@ type ServerProps = {
 
 export default function Server(props: ServerProps) {
   const groups = props.server.groups;
-  const hasClients = groups.some((group) =>
-    group.clients.some(
-      (client) => (client.connected || props.showOffline) && !props.deletedClientIds.includes(client.id),
-    ),
+  const hasClients = groups.some(
+    (group) => visibleClients(group, props.showOffline, props.deletedClientIds).length > 0,
   );
   return (
     <main className="app-main app-content container-fluid d-flex flex-column">

@@ -248,11 +248,6 @@ class TimeProvider {
     };
   }
 
-  // Add an exchange whose reply arrives now
-  setDiff(c2s: number, s2c: number) {
-    this.addSample(this.now(), c2s, s2c);
-  }
-
   // Server minus local clock at local time localMs
   diffAt(localMs: number): number {
     return lineAt(this.model, localMs);

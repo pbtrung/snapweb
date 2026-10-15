@@ -494,8 +494,6 @@ describe('SnapWeb', () => {
       });
       await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
       await waitFor(() => expect(snapStream.created).toHaveLength(1));
-      // The media session is refreshed on the next server update
-      act(() => ws.receive({ jsonrpc: '2.0', method: 'Group.OnMute', params: { id: 'g1', mute: false } }));
       ws.sent = [];
       return ws;
     }
@@ -508,6 +506,15 @@ describe('SnapWeb', () => {
       expect(session.playbackState).toBe('playing');
       // Without a known position there's no progress to report
       expect(session.position).toEqual({ duration: 0, playbackRate: 1, position: 0 });
+    });
+
+    it('leaves the media controls when playback stops', async () => {
+      await startPlayback();
+      await userEvent.click(screen.getByRole('button', { name: 'Stop playing' }));
+
+      expect(session.metadata).toBeNull();
+      expect(session.playbackState).toBe('none');
+      expect(session.handlers.get('pause')).toBeNull();
     });
 
     it('wires the supported actions to stream control', async () => {
@@ -535,7 +542,6 @@ describe('SnapWeb', () => {
       });
       await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
       await waitFor(() => expect(snapStream.created).toHaveLength(1));
-      act(() => ws.receive({ jsonrpc: '2.0', method: 'Group.OnMute', params: { id: 'g1', mute: false } }));
       ws.sent = [];
 
       session.handlers.get('seekbackward')({});

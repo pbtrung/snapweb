@@ -37,6 +37,7 @@ export default function VolumeControl(props: VolumeControlProps) {
         style={{ '--fill': volume + '%' } as CSSProperties}
         onChange={(event) => props.onChange(Number(event.target.value))}
         onPointerUp={props.onChangeEnd}
+        onPointerCancel={props.onChangeEnd}
         onKeyUp={props.onChangeEnd}
         onBlur={props.onChangeEnd}
       />

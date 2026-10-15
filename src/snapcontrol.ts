@@ -104,7 +104,7 @@ class RequestError extends Error {
 // servers used -32000 with an "Unauthorized" message
 function needsLogin(error: RpcError | undefined): boolean {
   if (!error) return false;
-  return error.code === 401 || (error.code === -32000 && /nauthorized/.test(String(error.message)));
+  return error.code === 401 || (error.code === -32000 && /unauthorized/i.test(String(error.message)));
 }
 
 // btoa only takes Latin-1, so encode the text as UTF-8 first
@@ -207,10 +207,7 @@ namespace Snapcast {
     clients: Client[] = [];
 
     getClient(id: string): Client | null {
-      for (const client of this.clients) {
-        if (client.id === id) return client;
-      }
-      return null;
+      return this.clients.find((client) => client.id === id) ?? null;
     }
   }
 
@@ -234,6 +231,14 @@ namespace Snapcast {
     artUrl?: string;
     duration?: number;
     url?: string;
+
+    getTitle(): string {
+      return this.title || 'Unknown Title';
+    }
+
+    getArtist(): string {
+      return this.artist?.length ? this.artist.join(', ') : 'Unknown Artist';
+    }
   }
 
   export class Properties {
@@ -256,11 +261,7 @@ namespace Snapcast {
       this.canPause = Boolean(json.canPause);
       this.canSeek = Boolean(json.canSeek);
       this.canControl = Boolean(json.canControl);
-      if (json.metadata !== undefined) {
-        this.metadata = new Metadata(json.metadata);
-      } else {
-        this.metadata = undefined;
-      }
+      this.metadata = json.metadata !== undefined ? new Metadata(json.metadata) : undefined;
     }
 
     loopStatus?: string;
@@ -355,19 +356,19 @@ namespace Snapcast {
     }
 
     getGroup(id: string): Group | null {
-      for (const group of this.groups) {
-        if (group.id === id) return group;
-      }
-      return null;
+      return this.groups.find((group) => group.id === id) ?? null;
     }
 
     getStream(id: string): Stream | null {
-      for (const stream of this.streams) {
-        if (stream.id === id) return stream;
-      }
-      return null;
+      return this.streams.find((stream) => stream.id === id) ?? null;
     }
   }
+}
+
+// The average volume of clients, 0 for none (rather than NaN)
+function averageVolume(clients: Snapcast.Client[]): number {
+  if (clients.length === 0) return 0;
+  return clients.reduce((sum, client) => sum + client.config.volume.percent, 0) / clients.length;
 }
 
 // Time to wait before reconnecting after the control connection is lost
@@ -681,21 +682,10 @@ class SnapControl {
     return group;
   }
 
-  public getGroupVolume(group: Snapcast.Group, online: boolean): number {
-    const clients = group.clients.filter((client) => !online || client.connected);
-    if (clients.length === 0) return 0;
-    return clients.reduce((sum, client) => sum + client.config.volume.percent, 0) / clients.length;
-  }
-
   public getGroupFromClient(client_id: string): Snapcast.Group {
-    for (const group of this.server.groups)
-      for (const client of group.clients) if (client.id === client_id) return group;
-    throw new Error(`group for client ${client_id} was null`);
-  }
-
-  public getStreamFromClient(client_id: string): Snapcast.Stream {
-    const group: Snapcast.Group = this.getGroupFromClient(client_id);
-    return this.getStream(group.stream_id);
+    const group = this.server.groups.find((group) => group.getClient(client_id) !== null);
+    if (!group) throw new Error(`group for client ${client_id} was null`);
+    return group;
   }
 
   public getStream(stream_id: string): Snapcast.Stream {
@@ -825,7 +815,7 @@ class SnapControl {
         return;
       }
       // Responses only matter when they carry the server status
-      if (json_msg.id !== this.status_req_id) return;
+      if (json_msg.id !== this.status_req_id || !json_msg.result?.server) return;
       this.server = new Snapcast.Server(json_msg.result.server);
       this.refetchDelay = STATUS_RETRY_MIN_MS;
       this.setAuthRequired(false);
@@ -836,8 +826,10 @@ class SnapControl {
         try {
           this.onNotification(notification);
         } catch (e) {
-          // e.g. a client or group this model doesn't know (yet)
+          // e.g. a client or group this model doesn't know (yet), so the
+          // model is out of line until the status is fetched again
           console.warn('Failed to apply ' + notification.method + ': ' + e);
+          this.scheduleRefetch();
         }
       }
     }
@@ -845,5 +837,5 @@ class SnapControl {
   }
 }
 
-export { SnapControl, base64, needsLogin };
+export { SnapControl, averageVolume, base64, needsLogin };
 export { Snapcast };

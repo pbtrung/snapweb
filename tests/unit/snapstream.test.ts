@@ -6,7 +6,6 @@ import {
   JsonMessage,
   PcmChunkMessage,
   SampleFormat,
-  SnapStream,
   TimeMessage,
   TimeProvider,
   Tv,
@@ -186,15 +185,6 @@ describe('AudioClock', () => {
     }
     expect(clock.offsets).toHaveLength(25);
     expect(clock.offsets[0]).toBeCloseTo(501.5);
-  });
-});
-
-describe('SnapStream.getClientId', () => {
-  it('creates a UUID once and persists it', () => {
-    window.localStorage.clear();
-    const id = SnapStream.getClientId();
-    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    expect(SnapStream.getClientId()).toBe(id);
   });
 });
 

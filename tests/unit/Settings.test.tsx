@@ -6,6 +6,7 @@ import { config, Theme } from '../../src/config';
 import { SnapControl, Snapcast } from '../../src/snapcontrol';
 import { connectedControl, quietConsole, requests } from '../helpers/snapControl';
 import type { FakeWebSocket } from '../helpers/fakeWebSocket';
+import { makeServerStatus } from '../fixtures/serverStatus';
 
 describe('SettingsDialog', () => {
   let control: SnapControl;
@@ -194,6 +195,19 @@ describe('SettingsDialog', () => {
         expect.objectContaining({ params: { id: 'g2', stream_id: 's1' } }),
       ]);
       expect(requests(ws, 'Group.SetClients')).toHaveLength(0);
+    });
+
+    it('skips a group that left the server while the dialog was open', async () => {
+      const { onClose } = renderSettings();
+      await userEvent.click(screen.getByRole('tab', { name: 'Groups' }));
+      await userEvent.selectOptions(group('Office').getByRole('combobox', { name: 'Stream' }), 's1');
+      const status = makeServerStatus();
+      status.groups.pop();
+      ws.receive({ jsonrpc: '2.0', method: 'Server.OnUpdate', params: { server: status } });
+      await ok();
+
+      expect(requests(ws, 'Group.SetStream')).toHaveLength(0);
+      expect(onClose).toHaveBeenCalledWith(true);
     });
 
     it('does not send anything when nothing changed', async () => {

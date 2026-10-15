@@ -43,13 +43,6 @@ const CLOCK_JUMP_SAMPLES = 3; // consecutive offsets beyond it that mean a jump
 
 const RECONNECT_DELAY_MS = 1000;
 
-declare global {
-  // declare window.webkitAudioContext for the ts compiler
-  interface Window {
-    webkitAudioContext: typeof AudioContext;
-  }
-}
-
 // declare AudioContext.outputLatency and getOutputTimestamp for the ts
 // compiler; standardized-audio-context wraps neither
 interface IAudioContextPatched extends IAudioContext {
@@ -313,16 +306,22 @@ class PcmChunkMessage extends BaseMessage {
     this.payload = buffer.slice(HEADER_SIZE + 12);
   }
 
-  readFrames(frames: number): ArrayBuffer {
-    const frameSize = this.sampleFormat.frameSize();
-    const frameCnt = Math.min(frames, this.getFrameCount() - this.idx);
-    const begin = this.idx * frameSize;
+  // Reads up to frames frames as interleaved samples, a view into the
+  // payload rather than a copy
+  readFrames(frames: number): Int16Array | Int32Array {
+    const format = this.sampleFormat;
+    const frameCnt = Math.max(0, Math.min(frames, this.getFrameCount() - this.idx));
+    const begin = this.idx * format.frameSize();
     this.idx += frameCnt;
-    return this.payload.slice(begin, begin + frameCnt * frameSize);
+    const length = frameCnt * format.channels;
+    return format.sampleSize() === 4
+      ? new Int32Array(this.payload, begin, length)
+      : new Int16Array(this.payload, begin, length);
   }
 
+  // Whole frames only, should a payload end in a partial one
   getFrameCount(): number {
-    return this.payloadSize() / this.sampleFormat.frameSize();
+    return Math.floor(this.payloadSize() / this.sampleFormat.frameSize());
   }
 
   isEndOfChunk(): boolean {
@@ -376,12 +375,11 @@ class AudioStream {
     this.chunks.push(chunk);
     // Before the clock is synced the server time is unknown, so bound the
     // queue relative to the newest chunk instead
-    const newestMs = chunk.timestamp.getMilliseconds();
-    while (this.chunks.length > 0) {
-      const reference = this._timeProvider.isSynced() ? this._timeProvider.serverNow() : newestMs;
-      if (reference - this.chunks[0].timestamp.getMilliseconds() <= MAX_CHUNK_AGE_MS + this._bufferMs) break;
-      this.chunks.shift();
-    }
+    const reference = this._timeProvider.isSynced()
+      ? this._timeProvider.serverNow()
+      : chunk.timestamp.getMilliseconds();
+    const oldestMs = reference - MAX_CHUNK_AGE_MS - this._bufferMs;
+    while (this.chunks.length > 0 && this.chunks[0].timestamp.getMilliseconds() < oldestMs) this.chunks.shift();
   }
 
   // Skip or pad so the current chunk starts at the play time. Returns the
@@ -411,18 +409,18 @@ class AudioStream {
 
   getNextBuffer(buffer: IAudioBuffer, playTimeMs: number) {
     const frames = buffer.length;
-    if (!this._timeProvider.isSynced() || !Number.isFinite(playTimeMs)) {
-      // Without a server time, or before the audio clock runs, we can't tell
-      // which chunk is due, so play silence instead of dropping or skipping
-      // chunks
-      buffer.getChannelData(0).fill(0);
-      buffer.getChannelData(1).fill(0);
-      return;
-    }
+    // Written in place (copyToChannel is not supported by Safari); buffers
+    // are reused, so start from silence
+    const left = buffer.getChannelData(0);
+    const right = buffer.getChannelData(1);
+    left.fill(0);
+    right.fill(0);
+    // Without a server time, or before the audio clock runs, we can't tell
+    // which chunk is due, so play silence instead of dropping or skipping
+    // chunks
+    if (!this._timeProvider.isSynced() || !Number.isFinite(playTimeMs)) return;
     this.chunk ??= this.chunks.shift();
 
-    const left = new Float32Array(frames);
-    const right = new Float32Array(frames);
     let read = 0;
     let pos = 0;
     const serverPlayTimeMs = this._timeProvider.serverTime(playTimeMs);
@@ -452,10 +450,9 @@ class AudioStream {
 
         while (read < readFrames && this.chunk) {
           const pcmChunk = this.chunk;
-          const pcmBuffer = pcmChunk.readFrames(readFrames - read);
+          const payload = pcmChunk.readFrames(readFrames - read);
           // Signed PCM peaks at 2^(bits-1), e.g. 32767 for 16 bit
           const normalize: number = 2 ** (pcmChunk.sampleFormat.bits - 1);
-          const payload = pcmChunk.sampleFormat.bits >= 24 ? new Int32Array(pcmBuffer) : new Int16Array(pcmBuffer);
           for (let i = 0; i < payload.length; i += 2) {
             read++;
             left[pos] = payload[i] / normalize;
@@ -476,18 +473,8 @@ class AudioStream {
           }
           if (pcmChunk.isEndOfChunk()) this.chunk = this.chunks.shift();
         }
-        if (read === readFrames) read = frames;
       }
     }
-
-    if (read < frames) {
-      left.fill(0, pos);
-      right.fill(0, pos);
-    }
-
-    // copyToChannel is not supported by Safari
-    buffer.getChannelData(0).set(left);
-    buffer.getChannelData(1).set(right);
   }
 }
 
@@ -600,7 +587,8 @@ class FlacDecoder extends Decoder {
   }
 
   decode(chunk: PcmChunkMessage): PcmChunkMessage | null {
-    this.flacChunk = chunk.payload.slice(0);
+    // clearPayload replaces the payload rather than changing it
+    this.flacChunk = new Uint8Array(chunk.payload);
     this.pcmChunk = chunk;
     this.pcmChunk.clearPayload();
     this.cacheInfo = { cachedBlocks: 0, isCachedChunk: true };
@@ -628,7 +616,7 @@ class FlacDecoder extends Decoder {
 
   private restart() {
     this.dispose();
-    this.flacChunk = new ArrayBuffer(0);
+    this.flacChunk = new Uint8Array(0);
     this.decoder = this.createDecoder();
     if (this.streamHeader) this.setHeader(this.streamHeader);
   }
@@ -638,14 +626,12 @@ class FlacDecoder extends Decoder {
       const data = new Uint8Array(this.header);
       this.header = null;
       return { buffer: data, readDataLength: data.byteLength, error: false };
-    } else if (this.flacChunk) {
-      // a fresh read => next call to write will not be from cached data
-      this.cacheInfo.isCachedChunk = false;
-      const data = new Uint8Array(this.flacChunk.slice(0, Math.min(bufferSize, this.flacChunk.byteLength)));
-      this.flacChunk = this.flacChunk.slice(data.byteLength);
-      return { buffer: data, readDataLength: data.byteLength, error: false };
     }
-    return { buffer: new Uint8Array(0), readDataLength: 0, error: false };
+    // a fresh read => next call to write will not be from cached data
+    this.cacheInfo.isCachedChunk = false;
+    const data = this.flacChunk.subarray(0, bufferSize);
+    this.flacChunk = this.flacChunk.subarray(data.byteLength);
+    return { buffer: data, readDataLength: data.byteLength, error: false };
   }
 
   write_callback_fn(data: Array<Uint8Array>, frameInfo: Flac.BlockMetadata) {
@@ -657,7 +643,7 @@ class FlacDecoder extends Decoder {
     const view = new DataView(payload);
     const sample_size = this.sampleFormat.sampleSize();
     for (let channel: number = 0; channel < frameInfo.channels; ++channel) {
-      const channelData = new DataView(data[channel].buffer, 0, data[channel].buffer.byteLength);
+      const channelData = new DataView(data[channel].buffer, data[channel].byteOffset, data[channel].byteLength);
       for (let i: number = 0; i < frameInfo.blocksize; ++i) {
         const write_idx = sample_size * (frameInfo.channels * i + channel);
         const read_idx = sample_size * i;
@@ -695,7 +681,8 @@ class FlacDecoder extends Decoder {
   // The header still to be read by the decoder, and a copy for restarts
   header: ArrayBuffer | null = null;
   streamHeader: ArrayBuffer | null = null;
-  flacChunk: ArrayBuffer = new ArrayBuffer(0);
+  // The rest of the chunk being decoded, not yet read by the decoder
+  flacChunk: Uint8Array<ArrayBuffer> = new Uint8Array(0);
   pcmChunk?: PcmChunkMessage;
 
   cacheInfo: { isCachedChunk: boolean; cachedBlocks: number } = { isCachedChunk: false, cachedBlocks: 0 };
@@ -853,7 +840,6 @@ class SnapStream {
   }
 
   private setupAudioContext(): boolean {
-    if (!AudioContext) return false;
     let options: AudioContextOptions | undefined = {
       latencyHint: 'interactive',
       sampleRate: this.sampleFormat ? this.sampleFormat.rate : undefined,
@@ -863,15 +849,16 @@ class SnapStream {
       // Some older browsers won't decode the stream if options are provided.
       options = undefined;
     }
-    this.ctx = new AudioContextPatched(options);
+    try {
+      this.ctx = new AudioContextPatched(options);
+    } catch (e) {
+      console.error('Failed to create an audio context: ' + e);
+      return false;
+    }
     this.audioClock = new AudioClock(this.ctx);
     this.gainNode = this.ctx.createGain();
     this.gainNode.connect(this.ctx.destination);
     return true;
-  }
-
-  public static getClientId(): string {
-    return getClientId();
   }
 
   private connect() {
@@ -887,7 +874,7 @@ class SnapStream {
       hello.arch = 'web';
       hello.os = navigator?.platform || 'unknown';
       hello.hostname = 'Snapweb client';
-      hello.uniqueId = SnapStream.getClientId();
+      hello.uniqueId = getClientId();
       this.sendMessage(hello);
       // The server may have restarted with another clock
       this.timeProvider.reset();
@@ -959,7 +946,7 @@ class SnapStream {
       this.setupAudioContext();
     }
 
-    this.ctx.resume();
+    this.ctx.resume().catch((e) => console.warn('Failed to resume the audio context: ' + e));
     this.applyVolume();
     this.stream = new AudioStream(this.timeProvider, sampleFormat, this.bufferMs);
     this.play();
@@ -1059,6 +1046,7 @@ class SnapStream {
     if (socket) {
       socket.onopen = null;
       socket.onmessage = null;
+      socket.onerror = null;
       socket.onclose = null;
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
     }

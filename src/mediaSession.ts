@@ -3,7 +3,6 @@ import snapcast512 from './assets/snapcast-512.png';
 
 // Seconds to skip when the platform doesn't say how far
 const DEFAULT_SKIP_SECONDS = 10;
-const ARTWORK_SIZES = ['96x96', '128x128', '192x192', '256x256', '384x384', '512x512'];
 
 function setActionHandler(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
   try {
@@ -11,6 +10,25 @@ function setActionHandler(action: MediaSessionAction, handler: MediaSessionActio
   } catch {
     // Not every browser supports every action, e.g. "stop" or "seekto"
   }
+}
+
+const ACTIONS: MediaSessionAction[] = [
+  'play',
+  'pause',
+  'previoustrack',
+  'nexttrack',
+  'stop',
+  'seekbackward',
+  'seekforward',
+  'seekto',
+];
+
+// Take Snapweb out of the platform's media controls once it stops playing
+export function clearMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = null;
+  navigator.mediaSession.playbackState = 'none';
+  for (const action of ACTIONS) setActionHandler(action, null);
 }
 
 // Mirror a stream's metadata, playback state and controls in the platform's
@@ -24,12 +42,11 @@ export function updateMediaSession(snapControl: SnapControl, streamId: string, a
 
   const artUrl = metadata?.artUrl;
   mediaSession.metadata = new MediaMetadata({
-    title: metadata?.title || 'Unknown Title',
-    artist: metadata?.artist !== undefined ? metadata.artist.join(', ') : 'Unknown Artist',
+    title: metadata?.getTitle() ?? 'Unknown Title',
+    artist: metadata?.getArtist() ?? 'Unknown Artist',
     album: metadata?.album || '',
-    artwork: artUrl
-      ? ARTWORK_SIZES.map((sizes) => ({ src: artUrl, sizes, type: 'image/png' }))
-      : [{ src: snapcast512, sizes: '512x512', type: 'image/png' }],
+    // The cover's format and size are unknown, so let the browser find out
+    artwork: artUrl ? [{ src: artUrl }] : [{ src: snapcast512, sizes: '512x512', type: 'image/png' }],
   });
 
   // Snapweb plays silence through this element, which keeps the page's media

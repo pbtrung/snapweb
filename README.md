@@ -9,7 +9,7 @@ mobile devices, with the look and feel of
 Requires Node.js 22.22.2+, 24.15+ or 26+ (see `engines` in `package.json`).
 
 1. Point the dev server at your snapserver (the default is the page's own
-   host). This is only the default: a host entered in Settings takes over
+   host). This is only the default: a host entered in Settings takes over.
     ```bash
     echo 'VITE_APP_SNAPSERVER_HOST = localhost:1780' > .env.local
     ```
