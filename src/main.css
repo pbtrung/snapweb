@@ -60,6 +60,12 @@
   }
 }
 
+/* The body background is painted over the page, but sized to the html
+   element; at full height, the wash doesn't grow as content renders */
+html {
+  min-height: 100%;
+}
+
 body {
   /* A faint wash of the brand color behind the top of the page */
   background-image: radial-gradient(
