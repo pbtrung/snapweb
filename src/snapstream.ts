@@ -70,6 +70,17 @@ function median(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
+function concatBuffers(buffers: ArrayBuffer[]): ArrayBuffer {
+  if (buffers.length === 1) return buffers[0];
+  const out = new Uint8Array(buffers.reduce((size, buffer) => size + buffer.byteLength, 0));
+  let offset = 0;
+  for (const buffer of buffers) {
+    out.set(new Uint8Array(buffer), offset);
+    offset += buffer.byteLength;
+  }
+  return out.buffer;
+}
+
 function getChromeVersion(): number | null {
   const raw = navigator.userAgent.match(/Chrom(e|ium)\/([0-9]+)\./);
   return raw ? parseInt(raw[2]) : null;
@@ -342,15 +353,10 @@ class PcmChunkMessage extends BaseMessage {
     return this.payload.byteLength;
   }
 
-  clearPayload(): void {
-    this.payload = new ArrayBuffer(0);
-  }
-
-  addPayload(buffer: ArrayBuffer) {
-    const payload = new Uint8Array(this.payload.byteLength + buffer.byteLength);
-    payload.set(new Uint8Array(this.payload));
-    payload.set(new Uint8Array(buffer), this.payload.byteLength);
-    this.payload = payload.buffer;
+  // Replaces the encoded payload with the decoded one
+  setPayload(payload: ArrayBuffer) {
+    this.payload = payload;
+    this.idx = 0;
   }
 
   timestamp: Tv = new Tv(0, 0);
@@ -581,77 +587,72 @@ class FlacDecoder extends Decoder {
         this.metadata_callback_fn.bind(this),
         false,
       );
-      Flac.setOptions(decoder, { analyseSubframes: true, analyseResiduals: true });
     }
     return decoder;
   }
 
+  // A chunk holds one or more whole FLAC frames
   decode(chunk: PcmChunkMessage): PcmChunkMessage | null {
-    // clearPayload replaces the payload rather than changing it
-    this.flacChunk = new Uint8Array(chunk.payload);
-    this.pcmChunk = chunk;
-    this.pcmChunk.clearPayload();
-    this.cacheInfo = { cachedBlocks: 0, isCachedChunk: true };
-    while (this.flacChunk.byteLength > 0) {
-      // A read that finds no more data, e.g. after bytes without a frame
-      // sync, ends the stream, and then process_single keeps returning true
-      // without reading anything
-      if (
-        !Flac.FLAC__stream_decoder_process_single(this.decoder) ||
-        Flac.FLAC__stream_decoder_get_state(this.decoder) >= FLAC_DECODER_END_OF_STREAM
-      ) {
-        // libflacjs has no flush, and a failed decoder stays failed, so
-        // start over from the stream header
+    this.input = new Uint8Array(chunk.payload);
+    this.frames = [];
+    // Decode frame by frame until the decoder has used up the chunk: its
+    // next read then finds no data, which ends the stream. Stopping as soon
+    // as the chunk is read instead would leave the frames libFLAC buffered
+    // after the first one for the next chunk.
+    for (;;) {
+      const ok = Flac.FLAC__stream_decoder_process_single(this.decoder);
+      const state = Flac.FLAC__stream_decoder_get_state(this.decoder);
+      if (ok && state === FLAC_DECODER_END_OF_STREAM) break;
+      if (!ok || state > FLAC_DECODER_END_OF_STREAM) {
+        // A failed decoder stays failed, so start over from the stream header
         console.warn('FLAC decoding failed, restarting the decoder');
         this.restart();
         return null;
       }
     }
-    if (this.cacheInfo.cachedBlocks > 0) {
-      const diffMs = this.cacheInfo.cachedBlocks / this.sampleFormat.msRate();
-      this.pcmChunk.timestamp.setMilliseconds(this.pcmChunk.timestamp.getMilliseconds() - diffMs);
-    }
-    return this.pcmChunk;
+    // The stream end is final until a reset (libflacjs has no flush), which
+    // also expects the stream header again
+    Flac.FLAC__stream_decoder_reset(this.decoder);
+    this.readHeader();
+
+    chunk.setPayload(concatBuffers(this.frames));
+    this.frames = [];
+    return chunk;
   }
 
   private restart() {
     this.dispose();
-    this.flacChunk = new Uint8Array(0);
     this.decoder = this.createDecoder();
-    if (this.streamHeader) this.setHeader(this.streamHeader);
+    this.readHeader();
+  }
+
+  private readHeader() {
+    this.input = this.streamHeader;
+    Flac.FLAC__stream_decoder_process_until_end_of_metadata(this.decoder);
+    this.input = new Uint8Array(0);
   }
 
   read_callback_fn(bufferSize: number): Flac.ReadResult | Flac.CompletedReadResult {
-    if (this.header) {
-      const data = new Uint8Array(this.header);
-      this.header = null;
-      return { buffer: data, readDataLength: data.byteLength, error: false };
-    }
-    // a fresh read => next call to write will not be from cached data
-    this.cacheInfo.isCachedChunk = false;
-    const data = this.flacChunk.subarray(0, bufferSize);
-    this.flacChunk = this.flacChunk.subarray(data.byteLength);
+    const data = this.input.subarray(0, bufferSize);
+    this.input = this.input.subarray(data.byteLength);
     return { buffer: data, readDataLength: data.byteLength, error: false };
   }
 
   write_callback_fn(data: Array<Uint8Array>, frameInfo: Flac.BlockMetadata) {
-    if (this.cacheInfo.isCachedChunk) {
-      // there was no call to read, so it's some cached data
-      this.cacheInfo.cachedBlocks += frameInfo.blocksize;
+    const channels = frameInfo.channels;
+    const frames = frameInfo.blocksize;
+    const wide = this.sampleFormat.sampleSize() === 4;
+    const payload = new ArrayBuffer(this.sampleFormat.frameSize() * frames);
+    const out = wide ? new Int32Array(payload) : new Int16Array(payload);
+    for (let channel = 0; channel < channels; ++channel) {
+      // libflacjs packs each channel's samples at the output sample size
+      const bytes = data[channel].byteOffset % out.BYTES_PER_ELEMENT === 0 ? data[channel] : data[channel].slice();
+      const samples = wide
+        ? new Int32Array(bytes.buffer, bytes.byteOffset, frames)
+        : new Int16Array(bytes.buffer, bytes.byteOffset, frames);
+      for (let i = 0; i < frames; ++i) out[i * channels + channel] = samples[i];
     }
-    const payload = new ArrayBuffer(this.sampleFormat.frameSize() * frameInfo.blocksize);
-    const view = new DataView(payload);
-    const sample_size = this.sampleFormat.sampleSize();
-    for (let channel: number = 0; channel < frameInfo.channels; ++channel) {
-      const channelData = new DataView(data[channel].buffer, data[channel].byteOffset, data[channel].byteLength);
-      for (let i: number = 0; i < frameInfo.blocksize; ++i) {
-        const write_idx = sample_size * (frameInfo.channels * i + channel);
-        const read_idx = sample_size * i;
-        if (sample_size == 4) view.setInt32(write_idx, channelData.getInt32(read_idx, true), true);
-        else view.setInt16(write_idx, channelData.getInt16(read_idx, true), true);
-      }
-    }
-    this.pcmChunk!.addPayload(payload);
+    this.frames.push(payload);
   }
 
   metadata_callback_fn(data: any) {
@@ -665,9 +666,8 @@ class FlacDecoder extends Decoder {
   }
 
   setHeader(buffer: ArrayBuffer): SampleFormat | null {
-    this.streamHeader = buffer.slice(0);
-    this.header = buffer.slice(0);
-    Flac.FLAC__stream_decoder_process_until_end_of_metadata(this.decoder);
+    this.streamHeader = new Uint8Array(buffer.slice(0));
+    this.readHeader();
     return this.sampleFormat;
   }
 
@@ -678,14 +678,12 @@ class FlacDecoder extends Decoder {
 
   sampleFormat: SampleFormat = new SampleFormat();
   decoder: number;
-  // The header still to be read by the decoder, and a copy for restarts
-  header: ArrayBuffer | null = null;
-  streamHeader: ArrayBuffer | null = null;
-  // The rest of the chunk being decoded, not yet read by the decoder
-  flacChunk: Uint8Array<ArrayBuffer> = new Uint8Array(0);
-  pcmChunk?: PcmChunkMessage;
-
-  cacheInfo: { isCachedChunk: boolean; cachedBlocks: number } = { isCachedChunk: false, cachedBlocks: 0 };
+  // The stream header, read again on every reset
+  streamHeader: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+  // What the decoder has yet to read
+  input: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+  // The PCM frames decoded from the current chunk
+  frames: ArrayBuffer[] = [];
 }
 
 const OPUS_SAMPLE_RATES = [8000, 12000, 16000, 24000, 48000];
@@ -745,8 +743,7 @@ class OpusDecoder extends Decoder {
         }
       }
 
-      chunk.clearPayload();
-      chunk.addPayload(view.buffer);
+      chunk.setPayload(view.buffer);
       return chunk;
     } catch (err) {
       console.error('Failed to decode Opus frame:', err);
@@ -1117,8 +1114,10 @@ export { SnapStream };
 export {
   AudioClock,
   AudioStream,
+  FlacDecoder,
   JsonMessage,
   HelloMessage,
+  OpusDecoder,
   PcmChunkMessage,
   SampleFormat,
   TimeMessage,
