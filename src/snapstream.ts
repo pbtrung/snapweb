@@ -1,6 +1,6 @@
 import Flac from 'libflacjs/dist/libflac.js';
 import { getClientId } from './config.ts';
-import { TimeProvider } from './timeProvider.ts';
+import { TimeProvider, median } from './timeProvider.ts';
 import {
   AudioContext,
   IAudioBuffer,
@@ -65,11 +65,6 @@ class AudioContextPatched extends AudioContext implements IAudioContextPatched {
   }
 }
 
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
-}
-
 function concatBuffers(buffers: ArrayBuffer[]): ArrayBuffer {
   if (buffers.length === 1) return buffers[0];
   const out = new Uint8Array(buffers.reduce((size, buffer) => size + buffer.byteLength, 0));
@@ -79,11 +74,6 @@ function concatBuffers(buffers: ArrayBuffer[]): ArrayBuffer {
     offset += buffer.byteLength;
   }
   return out.buffer;
-}
-
-function getChromeVersion(): number | null {
-  const raw = navigator.userAgent.match(/Chrom(e|ium)\/([0-9]+)\./);
-  return raw ? parseInt(raw[2]) : null;
 }
 
 class Tv {
@@ -457,12 +447,13 @@ class AudioStream {
         while (read < readFrames && this.chunk) {
           const pcmChunk = this.chunk;
           const payload = pcmChunk.readFrames(readFrames - read);
-          // Signed PCM peaks at 2^(bits-1), e.g. 32767 for 16 bit
-          const normalize: number = 2 ** (pcmChunk.sampleFormat.bits - 1);
+          // Signed PCM peaks at 2^(bits-1), e.g. 32767 for 16 bit; a power
+          // of two, so multiplying by its inverse is exact
+          const scale = 2 ** -(pcmChunk.sampleFormat.bits - 1);
           for (let i = 0; i < payload.length; i += 2) {
             read++;
-            left[pos] = payload[i] / normalize;
-            right[pos] = payload[i + 1] / normalize;
+            left[pos] = payload[i] * scale;
+            right[pos] = payload[i + 1] * scale;
             if (everyN !== 0 && read % everyN === 0 && corrections < Math.abs(addFrames)) {
               corrections++;
               if (addFrames > 0) {
@@ -516,14 +507,14 @@ class AudioClock {
     if (this.offsets.length > 0 && Math.abs(sample - this.offset) > CLOCK_JUMP_THRESHOLD_MS) {
       // One stray offset is noise, several in a row mean the clock jumped
       if (this.jumpOffsets.push(sample) < CLOCK_JUMP_SAMPLES) return;
-      const jumped = median(this.jumpOffsets);
+      const jumped = median(this.jumpOffsets)!;
       console.info('Audio clock jumped by ' + (jumped - this.offset).toFixed(1) + ' ms, resyncing');
       this.offsets = this.jumpOffsets;
     } else if (this.offsets.push(sample) > CLOCK_WINDOW) {
       this.offsets.shift();
     }
     this.jumpOffsets = [];
-    this.offset = median(this.offsets);
+    this.offset = median(this.offsets)!;
   }
 
   offset: number = 0;
@@ -837,15 +828,11 @@ class SnapStream {
   }
 
   private setupAudioContext(): boolean {
-    let options: AudioContextOptions | undefined = {
-      latencyHint: 'interactive',
-      sampleRate: this.sampleFormat ? this.sampleFormat.rate : undefined,
-    };
-    const chromeVersion = getChromeVersion();
-    if ((chromeVersion !== null && chromeVersion < 55) || !window.AudioContext) {
-      // Some older browsers won't decode the stream if options are provided.
-      options = undefined;
-    }
+    // Older browsers without a native AudioContext won't decode the stream
+    // if options are provided
+    const options: AudioContextOptions | undefined = window.AudioContext
+      ? { latencyHint: 'interactive', sampleRate: this.sampleFormat?.rate }
+      : undefined;
     try {
       this.ctx = new AudioContextPatched(options);
     } catch (e) {
@@ -896,7 +883,7 @@ class SnapStream {
         this.handleCodecHeader(new CodecMessage(msg.data));
         break;
       case MessageType.WireChunk:
-        this.handleWireChunk(new PcmChunkMessage(msg.data, this.sampleFormat as SampleFormat));
+        this.handleWireChunk(msg.data);
         break;
       case MessageType.ServerSettings:
         this.handleServerSettings(new ServerSettingsMessage(msg.data));
@@ -949,10 +936,11 @@ class SnapStream {
     this.play();
   }
 
-  private handleWireChunk(chunk: PcmChunkMessage) {
+  private handleWireChunk(buffer: ArrayBuffer) {
     const decoder = this.decoder;
-    if (!decoder) return;
-    Promise.resolve(decoder.decode(chunk))
+    // No codec header yet, or an unsupported one
+    if (!decoder || !this.sampleFormat) return;
+    Promise.resolve(decoder.decode(new PcmChunkMessage(buffer, this.sampleFormat)))
       .then((decoded) => {
         // Ignore chunks decoded after the decoder was replaced
         if (decoded && decoder === this.decoder) this.stream?.addChunk(decoded);

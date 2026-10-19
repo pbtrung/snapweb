@@ -284,4 +284,4 @@ class TimeProvider {
   pendingRequests: Set<number> = new Set<number>();
 }
 
-export { TimeProvider };
+export { TimeProvider, median };
