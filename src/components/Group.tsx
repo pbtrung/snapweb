@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Dropdown } from 'react-bootstrap';
-import { AudioLines, Clock, FolderOpen, Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-react';
+import { AudioLines, Clock, FolderOpen, Pause, Play, Radio, SkipBack, SkipForward, VolumeX } from 'lucide-react';
 import Client from './Client';
 import VolumeControl from './VolumeControl';
 import { SnapControl, Snapcast, averageVolume } from '../snapcontrol';
@@ -81,6 +81,7 @@ export default function Group(props: GroupProps) {
   const metadata = stream?.properties.metadata;
   const hasDuration = metadata?.duration !== undefined && metadata.duration > 0;
   const isPlaying = stream?.properties.playbackStatus === 'playing';
+  const properties = stream?.properties;
   // A stream without playback control still reports whether audio is coming in
   const isActive = isPlaying || stream?.status === 'playing';
 
@@ -90,6 +91,7 @@ export default function Group(props: GroupProps) {
         type="button"
         className="btn btn-ghost btn-icon"
         aria-label="Previous"
+        disabled={!properties?.canGoPrevious}
         onClick={() => props.snapcontrol.control(stream.id, 'previous')}
       >
         <SkipBack size={18} fill="currentColor" />
@@ -98,6 +100,7 @@ export default function Group(props: GroupProps) {
         type="button"
         className="btn btn-primary btn-icon btn-play"
         aria-label={isPlaying ? 'Pause' : 'Play'}
+        disabled={isPlaying ? !properties?.canPause : !properties?.canPlay}
         onClick={() => handlePlayPauseClicked(stream)}
       >
         {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
@@ -106,6 +109,7 @@ export default function Group(props: GroupProps) {
         type="button"
         className="btn btn-ghost btn-icon"
         aria-label="Next"
+        disabled={!properties?.canGoNext}
         onClick={() => props.snapcontrol.control(stream.id, 'next')}
       >
         <SkipForward size={18} fill="currentColor" />
@@ -190,6 +194,22 @@ export default function Group(props: GroupProps) {
           controls && <div className="mt-3 d-flex justify-content-center">{controls}</div>
         )}
 
+        {/* The server mutes a client when it or its group is muted, so the
+            client's own mute button can't undo a group mute */}
+        {clients.length === 1 && props.group.muted && (
+          <div className="group-muted mt-3 d-flex align-items-center gap-2 small text-body-secondary">
+            <VolumeX size={16} aria-hidden="true" />
+            <span className="flex-grow-1">Group muted</span>
+            <button
+              type="button"
+              className="btn btn-link btn-sm fw-semibold text-decoration-none"
+              aria-label={'Unmute ' + groupName}
+              onClick={handleMuteClicked}
+            >
+              Unmute
+            </button>
+          </div>
+        )}
         {clients.length > 1 && (
           <div className="group-volume mt-3">
             <div className="section-label mb-0 ps-1">Group volume</div>

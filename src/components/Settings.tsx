@@ -50,6 +50,8 @@ type ClientEdit = {
   // As it was when the dialog opened
   initialName: string;
   initialLatency: number;
+  // The latency last applied while editing, if any
+  appliedLatency?: number;
 };
 
 function groupLabel(group: Snapcast.Group, index: number): string {
@@ -105,37 +107,102 @@ export default function SettingsDialog(props: SettingsDialogProps) {
     (client) => !props.deletedClientIds.includes(client.id) && props.server.getClient(client.id) !== null,
   );
 
-  function applyGroups() {
+  // Regroups one request at a time, each planned from the status the one
+  // before returned. Snapserver splits the clients a group loses into new
+  // groups and removes groups left empty, so a step can remove the group a
+  // later step was meant for, e.g. when two groups swap their clients. Its
+  // clients are then gathered in a group holding one of them by now, which
+  // takes on the removed group's stream, name and mute.
+  async function applyGroups() {
+    const control = props.snapcontrol;
     for (const group of groups) {
       if (streamIds[group.id] !== initialStreamIds[group.id] && groupExists(group.id))
-        props.snapcontrol.setStream(group.id, streamIds[group.id]);
+        control.setStream(group.id, streamIds[group.id]);
     }
     // Adding a client to a group takes it out of its old group, so a group
     // that only lost clients to other groups needs no request of its own.
     // Groups gaining clients go first, so a group that only had clients
     // taken out still exists when its turn comes.
-    const requests = groups.flatMap((group) => {
-      const members = clients.filter((client) => groupIds[client.id] === group.id && exists(client.id));
-      const gains = members.some((client) => initialGroupIds[client.id] !== group.id);
+    const plans = groups.flatMap((group) => {
+      const members = clients.filter((client) => groupIds[client.id] === group.id).map((client) => client.id);
+      const gains = members.some((id) => initialGroupIds[id] !== group.id);
       const takenOut = clients.some(
-        (client) => initialGroupIds[client.id] === group.id && groupIds[client.id] === null && exists(client.id),
+        (client) => initialGroupIds[client.id] === group.id && groupIds[client.id] === null,
       );
-      return (gains || takenOut) && groupExists(group.id) ? [{ group, members, gains }] : [];
+      return gains || takenOut ? [{ group, members, gains }] : [];
     });
-    requests.sort((a, b) => Number(b.gains) - Number(a.gains));
-    for (const { group, members } of requests)
-      props.snapcontrol.setClients(
-        group.id,
-        members.map((client) => client.id),
-      );
+    plans.sort((a, b) => Number(b.gains) - Number(a.gains));
+    // Groups yet to be regrouped, which shouldn't be taken over for another
+    // group's clients, and groups already regrouped, which mustn't be
+    const pending = new Set(plans.map(({ group }) => group.id));
+    const claimed = new Set<string>();
+    try {
+      for (const { group, members } of plans) {
+        pending.delete(group.id);
+        const ids = members.filter(exists);
+        const carrier = carrierGroup(group.id, ids, pending, claimed);
+        if (!carrier) continue;
+        claimed.add(carrier.id);
+        const current = carrier.clients.map((client) => client.id);
+        if (current.length !== ids.length || ids.some((id) => !current.includes(id)))
+          await control.setClients(carrier.id, ids);
+        if (carrier.id !== group.id && groupExists(carrier.id)) takeOverSettings(carrier.id, group);
+      }
+      // Clients taken out of a group that no other step left on their own
+      for (const client of clients) {
+        if (groupIds[client.id] !== null || !exists(client.id)) continue;
+        const group = control.getGroupFromClient(client.id);
+        if (group.clients.length < 2) continue;
+        await control.setClients(
+          group.id,
+          group.clients.filter(({ id }) => id !== client.id).map(({ id }) => id),
+        );
+      }
+    } catch (e) {
+      // The status is refetched, so the groups show where they ended up
+      console.warn('Regrouping stopped: ' + e);
+    }
+  }
+
+  // The group to gather the clients ids in for the group groupId: that group
+  // while it exists, otherwise one holding some of them
+  function carrierGroup(
+    groupId: string,
+    ids: string[],
+    pending: Set<string>,
+    claimed: Set<string>,
+  ): Snapcast.Group | null {
+    if (ids.length === 0) return null;
+    const server = props.snapcontrol.server;
+    const own = server.getGroup(groupId);
+    if (own && !claimed.has(groupId)) return own;
+    const holding = server.groups.filter(
+      (group) => !claimed.has(group.id) && group.clients.some((client) => ids.includes(client.id)),
+    );
+    return holding.find((group) => !pending.has(group.id)) ?? holding[0] ?? null;
+  }
+
+  // Gives a group the stream, name and mute meant for a removed one
+  function takeOverSettings(groupId: string, removed: Snapcast.Group) {
+    const control = props.snapcontrol;
+    const group = control.getGroup(groupId);
+    const streamId = streamIds[removed.id];
+    if (streamId && group.stream_id !== streamId) control.setStream(groupId, streamId);
+    if (group.name !== removed.name) control.setGroupName(groupId, removed.name);
+    if (group.muted !== removed.muted) control.muteGroup(groupId, removed.muted);
   }
 
   function applyClients(apply: boolean) {
     for (const [clientId, edit] of Object.entries(clientEdits)) {
       if (!exists(clientId)) continue;
-      // The last valid latency was already applied while editing
-      if (!apply) props.snapcontrol.setClientLatency(clientId, edit.initialLatency);
-      else if (edit.name !== edit.initialName) props.snapcontrol.setClientName(clientId, edit.name);
+      // The last valid latency was already applied while editing. Cancel
+      // restores only latencies changed here, and not over a newer change
+      // made elsewhere meanwhile.
+      if (!apply) {
+        const latency = props.snapcontrol.getClient(clientId).config.latency;
+        if (edit.appliedLatency !== undefined && latency === edit.appliedLatency)
+          props.snapcontrol.setClientLatency(clientId, edit.initialLatency);
+      } else if (edit.name !== edit.initialName) props.snapcontrol.setClientName(clientId, edit.name);
     }
   }
 
@@ -144,7 +211,7 @@ export default function SettingsDialog(props: SettingsDialogProps) {
       config.baseUrl = serverurl;
       config.theme = theme;
       config.showOffline = showOffline;
-      applyGroups();
+      void applyGroups();
     }
     applyClients(apply);
     props.onClose(apply);
@@ -162,10 +229,14 @@ export default function SettingsDialog(props: SettingsDialogProps) {
   }
 
   function handleLatencyChange(clientId: string, text: string) {
-    updateClientEdit(clientId, { latencyText: text });
     const value = Number(text);
-    if (text.trim() !== '' && Number.isFinite(value) && exists(clientId))
-      props.snapcontrol.setClientLatency(clientId, Math.round(value));
+    if (text.trim() === '' || !Number.isFinite(value) || !exists(clientId)) {
+      updateClientEdit(clientId, { latencyText: text });
+      return;
+    }
+    const latency = Math.round(value);
+    props.snapcontrol.setClientLatency(clientId, latency);
+    updateClientEdit(clientId, { latencyText: text, appliedLatency: latency });
   }
 
   const general = (

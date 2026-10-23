@@ -41,8 +41,11 @@ Requires Node.js 22.22.2+, 24.15+ or 26+ (see `engines` in `package.json`).
 
 Releases are published as `snapweb-vX.Y.Z.zip` on
 [GitHub](https://github.com/pbtrung/snapweb/releases). `update-snapweb.sh`
-downloads one and installs it into `./snapweb`, replacing the previous
-version in one step:
+downloads one and installs it into `./snapweb`. The release is unpacked next
+to the installed one and swapped in with two renames, so the web server never
+serves a half-extracted tree; between the renames the directory is briefly
+missing, and should the swap fail the previous release is put back. Updates
+of the same directory run one at a time:
 
 ```bash
 ./update-snapweb.sh            # the latest release
@@ -64,22 +67,52 @@ It needs `curl` or `wget`, and `unzip`. Point the `[http] doc_root` in your
    `http://<snapserver host>:1780`
 1. Enjoy :)
 
+Plain HTTP is fine without a login. With one, or for the full WebApp, serve
+Snapweb over HTTPS, see below.
+
 The app name and version come from `package.json`; bump `version` there
 before tagging a release.
+
+## HTTPS
+
+Over `http://` Snapweb talks to Snapserver over unencrypted WebSockets
+(`ws://`), where anyone on the network can read a login: the user name and
+password (`Server.Authenticate` and `Server.GetToken`) and the token after
+them. The login dialog warns about this for any host other than this device.
+Over `https://` Snapweb uses `wss://` instead.
+
+Use Snapserver's own HTTPS support where it has one, or put a reverse proxy
+with a certificate in front of it. The proxy must pass on the WebSocket
+upgrades for both `/jsonrpc` (control) and `/stream` (audio), e.g. with nginx:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:1780;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
 
 ## Login
 
 When Snapserver requires authentication for its control API, Snapweb asks for
 a user name and password and logs in with them (`Server.Authenticate`). The
-audio stream needs no login, so playback works either way.
+audio stream needs no login, so playback works either way. Use HTTPS for it,
+see above.
 
-- Snapweb then asks the server for a login token (`Server.GetToken`) and keeps
-  only the token, never the password. The token is valid for 24 hours; once it
-  expires Snapweb asks for the login again.
+- Snapweb then asks the server for a login token (`Server.GetToken`). When it
+  gets one it keeps only the token, never the password. How long a token stays
+  valid is up to the server; Snapweb finds out it expired when it next logs in
+  with it, on a reconnect, and then asks for the login again.
 - With **Remember me** the token is stored in the browser and survives
   restarts. Without it, it is kept for the browser tab only.
-- Servers without `Server.GetToken` get the login again on every reconnect
-  from memory, so it lasts until the page is closed or reloaded.
+- Servers without `Server.GetToken` can't issue tokens, so Snapweb keeps the
+  user name and password in memory instead (Base64 encoded for HTTP Basic
+  authentication, which is not encryption) and logs in with them again on
+  every reconnect. They are never stored, so the login lasts until the page is
+  closed or reloaded.
+- A token or login is only ever sent to the server that accepted it.
 - **Log out** in Settings forgets the login, including a stored token.
   Changing the Snapserver host forgets it too.
 
@@ -88,5 +121,12 @@ again.
 
 ## Setup as WebApp
 
-On Android open `http://<snapserver host>:1780` in Chrome and select in the menu
-`Add to homescreen`
+Snapweb is a progressive web app: served over HTTPS (see above), it installs
+with its own icon and window, and its service worker caches the app so it
+starts quickly and updates itself in the background. On Android open
+`https://<snapweb host>` in Chrome and select `Add to Home screen` or
+`Install app` in the menu.
+
+Browsers only run service workers on secure origins (HTTPS, or `localhost`).
+Over plain `http://<snapserver host>:1780` Chrome can still add a home screen
+shortcut, but it opens a normal browser tab without the caching and updates.

@@ -313,6 +313,44 @@ describe('AudioStream playback', () => {
     ]);
   });
 
+  it('plays a gap between chunks as silence', () => {
+    const format = sampleFormat();
+    const stream = new AudioStream(syncedProvider(), format, 1000);
+    stream.addChunk(pcmChunk(50000, frames(2), format));
+    stream.addChunk(pcmChunk(50102, frames(2), format));
+    const buffer = fakeBuffer(4);
+    stream.getNextBuffer(buffer as any, 50000);
+
+    expect(Array.from(buffer.channels[0]).map((sample) => Math.round((sample * 32768) / 1000))).toEqual([1, 2, 0, 0]);
+    // The rest of the gap comes before the chunk in the next buffer
+    expect(stream.chunk!.idx).toBe(0);
+  });
+
+  it('skips where a chunk overlaps the one before', () => {
+    const format = sampleFormat();
+    const stream = new AudioStream(syncedProvider(), format, 1000);
+    stream.addChunk(pcmChunk(50000, frames(10), format));
+    // starts 7 ms before the first one ends
+    stream.addChunk(pcmChunk(50003, frames(10), format));
+    const buffer = fakeBuffer(14);
+    stream.getNextBuffer(buffer as any, 50000);
+
+    expect(Array.from(buffer.channels[0]).map((sample) => Math.round((sample * 32768) / 1000))).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 8, 9, 10, 0,
+    ]);
+  });
+
+  it('plays chunks that follow on seamlessly as they are', () => {
+    const format = sampleFormat();
+    const stream = new AudioStream(syncedProvider(), format, 1000);
+    stream.addChunk(pcmChunk(50000, frames(2), format));
+    stream.addChunk(pcmChunk(50002, frames(2), format));
+    const buffer = fakeBuffer(4);
+    stream.getNextBuffer(buffer as any, 50000);
+
+    expect(Array.from(buffer.channels[0]).map((sample) => Math.round((sample * 32768) / 1000))).toEqual([1, 2, 1, 2]);
+  });
+
   it('bounds the queue by the newest chunk before the clock is synced', () => {
     const format = sampleFormat();
     const stream = new AudioStream(new TimeProvider(), format, 1000);

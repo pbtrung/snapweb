@@ -94,6 +94,19 @@ function normalizeBaseUrl(value: string): string {
   return url;
 }
 
+// Whether url is unencrypted (ws://) to another device, where a login sent
+// over it can be read on the way
+function isInsecureRemote(url: string): boolean {
+  if (!/^ws:\/\//i.test(url)) return false;
+  let host: string;
+  try {
+    host = new URL('http' + url.slice(2)).hostname;
+  } catch {
+    return true;
+  }
+  return !(host === 'localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host === '[::1]');
+}
+
 const config = {
   // The default is stored as '' rather than as a url, so it follows the page
   // location and VITE_APP_SNAPSERVER_HOST instead of being frozen
@@ -119,25 +132,42 @@ const config = {
   },
 };
 
+// A stored token with the server it was issued by, which only that server
+// gets. Tokens stored before it was recorded are plain strings.
+function parseStoredToken(value: string): { server?: string; token: string } {
+  try {
+    const parsed = JSON.parse(value);
+    if (typeof parsed?.token === 'string') return { server: parsed.server, token: parsed.token };
+  } catch {
+    // A plain token
+  }
+  return { token: value };
+}
+
 // The control API login token. With "Remember me" it is kept in
 // localStorage, otherwise in sessionStorage, which goes with the tab.
 // Passwords are never stored.
 const authToken = {
-  get(): string | undefined {
+  // The token for server, or the stored one whatever its server without one
+  get(server?: string): string | undefined {
     for (const name of ['localStorage', 'sessionStorage'] as const) {
       try {
-        const token = storage(name)?.getItem(keys.authToken);
-        if (token) return token;
+        const value = storage(name)?.getItem(keys.authToken);
+        if (!value) continue;
+        const stored = parseStoredToken(value);
+        if (server !== undefined && stored.server !== undefined && stored.server !== server) return undefined;
+        return stored.token;
       } catch (e) {
         console.warn('Failed to read the login token: ' + e);
       }
     }
     return undefined;
   },
-  set(token: string, remember: boolean) {
+  set(token: string, remember: boolean, server?: string) {
     this.clear();
     try {
-      storage(remember ? 'localStorage' : 'sessionStorage')?.setItem(keys.authToken, token);
+      const value = server === undefined ? token : JSON.stringify({ server, token });
+      storage(remember ? 'localStorage' : 'sessionStorage')?.setItem(keys.authToken, value);
     } catch (e) {
       console.warn('Failed to store the login token: ' + e);
     }
@@ -153,4 +183,14 @@ const authToken = {
   },
 };
 
-export { authToken, config, getClientId, getPersistentValue, normalizeBaseUrl, setPersistentValue, Theme, uuidv4 };
+export {
+  authToken,
+  config,
+  getClientId,
+  getPersistentValue,
+  isInsecureRemote,
+  normalizeBaseUrl,
+  setPersistentValue,
+  Theme,
+  uuidv4,
+};

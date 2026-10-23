@@ -55,6 +55,19 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'logo.svg'],
+      workbox: {
+        // Only local playback needs the audio code, so it is downloaded when
+        // playback first starts rather than by every install, and cached then
+        globIgnores: ['**/node_modules/**/*', 'sw.js', 'workbox-*.js', '**/{snapstream,flac,audio}-*.js'],
+        runtimeCaching: [
+          {
+            urlPattern: /\/assets\/(snapstream|flac|audio)-[^/]+\.js$/,
+            handler: 'CacheFirst',
+            // The names change with every release, so old ones expire
+            options: { cacheName: 'playback', expiration: { maxEntries: 6 } },
+          },
+        ],
+      },
       manifest: {
         name: 'Snapweb - Snapcast web client',
         short_name: 'Snapweb',

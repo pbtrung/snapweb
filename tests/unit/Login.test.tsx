@@ -18,6 +18,13 @@ describe('LoginDialog', () => {
     expect(screen.getByRole('checkbox', { name: 'Remember me' })).not.toBeChecked();
   });
 
+  it('warns that the login is sent unencrypted', () => {
+    const { rerender } = render(<LoginDialog open onLogin={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.queryByText(/isn't encrypted/)).not.toBeInTheDocument();
+    rerender(<LoginDialog open insecure onLogin={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByText(/isn't encrypted/)).toBeInTheDocument();
+  });
+
   it('logs in with the entered values', async () => {
     const onLogin = vi.fn().mockResolvedValue(undefined);
     render(<LoginDialog open onLogin={onLogin} onCancel={vi.fn()} />);

@@ -45,18 +45,43 @@ if [ -z "$tag" ] || [ -z "$url" ]; then
   exit 1
 fi
 
+mkdir -p "$(dirname "$DEST")"
+# One update of $DEST at a time, since they share $DEST.old
+lock="$DEST.lock"
+if ! mkdir "$lock" 2>/dev/null; then
+  printf "Another update of %s is running (if not, remove %s)\n" "$DEST" "$lock" >&2
+  exit 1
+fi
+tmp=""
+swapping=0
+cleanup() {
+  # Interrupted between the two renames below: put the old release back
+  if [ "$swapping" = 1 ] && [ ! -e "$DEST" ] && [ -e "$DEST.old" ]; then
+    mv "$DEST.old" "$DEST" && printf "Restored the previous release in %s\n" "$DEST" >&2
+  fi
+  [ -n "$tmp" ] && rm -rf "$tmp"
+  rmdir "$lock"
+}
+trap cleanup EXIT
+# dash skips the EXIT trap when interrupted, so exit through it
+trap 'exit 1' INT TERM HUP
+
+# A run that died between the renames without restoring (e.g. killed) left
+# the last release in $DEST.old
+if [ ! -e "$DEST" ] && [ -e "$DEST.old" ]; then
+  mv "$DEST.old" "$DEST"
+  printf "Restored the previous release in %s\n" "$DEST" >&2
+fi
+
 if [ "${FORCE:-0}" = 0 ] && [ "$(cat "$DEST/.version" 2>/dev/null)" = "$tag" ]; then
   printf "snapweb %s is already installed in %s\n" "$tag" "$DEST"
   exit 0
 fi
 
 # Unpack next to $DEST (same filesystem), so the swap below is two renames
-# and the web server never serves a half-extracted tree.
-mkdir -p "$(dirname "$DEST")"
+# and the web server never serves a half-extracted tree. Between the two
+# renames $DEST is briefly missing; a failure there restores it.
 tmp="$(mktemp -d "$(dirname "$DEST")/.snapweb.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
-# dash skips the EXIT trap when interrupted, so exit through it
-trap 'exit 1' INT TERM HUP
 
 printf "Downloading %s\n" "$url"
 fetch "$url" "$tmp/snapweb.zip"
@@ -83,8 +108,10 @@ printf "%s\n" "$tag" >"$tmp/new/.version"
 chmod -R a+rX "$tmp/new"
 
 rm -rf "$DEST.old"
-[ -e "$DEST" ] && mv "$DEST" "$DEST.old"
+swapping=1
+if [ -e "$DEST" ]; then mv "$DEST" "$DEST.old"; fi
 mv "$tmp/new" "$DEST"
+swapping=0
 rm -rf "$DEST.old"
 
 printf "Installed snapweb %s in %s\n" "$tag" "$DEST"

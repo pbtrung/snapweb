@@ -5,7 +5,7 @@ import Server from './Server';
 import SettingsDialog from './Settings';
 import LoginDialog from './Login';
 import UndoDeleteNotice from './UndoDeleteNotice';
-import { Theme, config, getClientId } from '../config';
+import { Theme, config, getClientId, isInsecureRemote } from '../config';
 import { SnapControl, Snapcast } from '../snapcontrol';
 import type { SnapStream } from '../snapstream';
 import logo from '../assets/logo192.png';
@@ -39,8 +39,9 @@ export default function SnapWeb() {
   const [authRequired, setAuthRequired] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   // Kept here rather than in the groups, so a pending delete survives its
-  // group being re-rendered, emptied or replaced by a server update
-  const [deletedClients, setDeletedClients] = useState<{ id: string; name: string }[]>([]);
+  // group being re-rendered, emptied or replaced by a server update. Each
+  // belongs to the server it was made on.
+  const [deletedClients, setDeletedClients] = useState<{ id: string; name: string; server: string }[]>([]);
   const snapstreamRef = useRef<SnapStream | null>(null);
   // Created on first use, rather than on every render
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -132,26 +133,22 @@ export default function SnapWeb() {
     };
   });
 
+  // Playback stops in the cleanup, so it also stops when the app unmounts
   useEffect(() => {
+    if (!isPlaying) return;
     const audio = getAudio();
-    if (!isPlaying) {
-      snapstreamRef.current?.stop();
-      snapstreamRef.current = null;
-      audio.pause();
-      audio.src = '';
-      clearMediaSession();
-      return;
-    }
     // Looping silence keeps the page's media session alive while playing
     audio.src = silence;
     audio.loop = true;
     // The audio stream and its decoders are loaded on first use, which
     // keeps them out of the initial bundle
     let cancelled = false;
+    let stream: SnapStream | null = null;
     Promise.all([audio.play(), import('../snapstream')])
       .then(([, { SnapStream }]) => {
         if (cancelled) return;
-        snapstreamRef.current = new SnapStream(config.baseUrl);
+        stream = new SnapStream(config.baseUrl);
+        snapstreamRef.current = stream;
         // Rather than waiting for the next server change
         handlersRef.current?.refreshMediaSession();
       })
@@ -162,17 +159,26 @@ export default function SnapWeb() {
       });
     return () => {
       cancelled = true;
+      stream?.stop();
+      if (snapstreamRef.current === stream) snapstreamRef.current = null;
+      audio.pause();
+      audio.src = '';
+      clearMediaSession();
     };
   }, [isPlaying]);
 
   function handleClientDelete(client: Snapcast.Client) {
     setDeletedClients((clients) =>
-      clients.some(({ id }) => id === client.id) ? clients : [...clients, { id: client.id, name: client.getName() }],
+      clients.some(({ id }) => id === client.id)
+        ? clients
+        : [...clients, { id: client.id, name: client.getName(), server: serverUrl }],
     );
   }
 
-  function handleUndoDeleteClose(clientId: string, undo: boolean) {
-    if (!undo) snapControl.deleteClient(clientId);
+  function handleUndoDeleteClose(clientId: string, server: string, undo: boolean) {
+    // Never on another server, which may know a client by the same id, nor
+    // for a client that is gone already
+    if (!undo && server === serverUrl && snapControl.server.getClient(clientId)) snapControl.deleteClient(clientId);
     setDeletedClients((clients) => clients.filter(({ id }) => id !== clientId));
   }
 
@@ -255,8 +261,8 @@ export default function SnapWeb() {
       <Server server={server} snapcontrol={snapControl} showOffline={showOffline} deletedClientIds={deletedClientIds} />
       {(deletedClients.length > 0 || showConnectionAlert || showLoginAlert) && (
         <div className="notice-stack">
-          {deletedClients.map(({ id, name }) => (
-            <UndoDeleteNotice key={id} name={name} onClose={(undo) => handleUndoDeleteClose(id, undo)} />
+          {deletedClients.map(({ id, name, server }) => (
+            <UndoDeleteNotice key={id} name={name} onClose={(undo) => handleUndoDeleteClose(id, server, undo)} />
           ))}
           {connectionAlert()}
           {loginAlert()}
@@ -266,6 +272,7 @@ export default function SnapWeb() {
       {loginOpen && (
         <LoginDialog
           open
+          insecure={isInsecureRemote(serverUrl)}
           onLogin={async (username, password, remember) => {
             await snapControl.login(username, password, remember);
             setLoginOpen(false);
@@ -293,8 +300,9 @@ export default function SnapWeb() {
             setSettingsOpen(false);
             if (apply) {
               if (config.baseUrl !== serverUrl) {
-                // The login belongs to the old server
+                // The login and pending deletes belong to the old server
                 snapControl.forgetLogin();
+                setDeletedClients([]);
                 // The audio stream is still connected to the old server
                 setIsPlaying(false);
                 setServer(new Snapcast.Server());

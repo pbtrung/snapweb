@@ -23,8 +23,14 @@ const ACTIONS: MediaSessionAction[] = [
   'seekto',
 ];
 
+// What the media session was last set from. Most server changes, e.g. a
+// client's volume, leave it as it is, and setting the same position again
+// would reset the position the platform moves on by itself.
+let shown: string | undefined;
+
 // Take Snapweb out of the platform's media controls once it stops playing
 export function clearMediaSession() {
+  shown = undefined;
   if (!('mediaSession' in navigator)) return;
   navigator.mediaSession.metadata = null;
   navigator.mediaSession.playbackState = 'none';
@@ -39,6 +45,10 @@ export function updateMediaSession(snapControl: SnapControl, streamId: string, a
   const properties = snapControl.getStream(streamId).properties;
   const metadata = properties.metadata;
   const mediaSession = navigator.mediaSession;
+
+  const state = JSON.stringify([streamId, properties]);
+  if (state === shown) return;
+  shown = state;
 
   const artUrl = metadata?.artUrl;
   mediaSession.metadata = new MediaMetadata({

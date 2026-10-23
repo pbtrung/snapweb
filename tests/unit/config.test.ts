@@ -4,6 +4,7 @@ import {
   config,
   getClientId,
   getPersistentValue,
+  isInsecureRemote,
   normalizeBaseUrl,
   setPersistentValue,
   Theme,
@@ -132,5 +133,24 @@ describe('normalizeBaseUrl', () => {
 
     authToken.clear();
     expect(authToken.get()).toBeUndefined();
+  });
+
+  it('gives a login token only to the server that issued it', () => {
+    authToken.set('jwt', true, 'ws://a:1780');
+    expect(authToken.get('ws://a:1780')).toBe('jwt');
+    expect(authToken.get('ws://b:1780')).toBeUndefined();
+    // Stored before the server was recorded with it
+    window.localStorage.setItem('auth.token', 'old');
+    expect(authToken.get('ws://b:1780')).toBe('old');
+    authToken.clear();
+  });
+
+  it('tells unencrypted connections to other devices', () => {
+    expect(isInsecureRemote('ws://192.168.1.2:1780')).toBe(true);
+    expect(isInsecureRemote('ws://snapserver.lan')).toBe(true);
+    expect(isInsecureRemote('wss://snapserver.lan')).toBe(false);
+    expect(isInsecureRemote('ws://localhost:1780')).toBe(false);
+    expect(isInsecureRemote('ws://127.0.0.1:1780')).toBe(false);
+    expect(isInsecureRemote('ws://[::1]:1780')).toBe(false);
   });
 });

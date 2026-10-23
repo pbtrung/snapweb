@@ -54,6 +54,15 @@ describe('Group', () => {
     expect(screen.getAllByRole('slider', { name: / volume$/ })).toHaveLength(1);
   });
 
+  it('offers to unmute a muted group with one visible client, which the client cannot undo', async () => {
+    renderGroup('g2', true);
+    expect(screen.getByText('Group muted')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Unmute Office' }));
+
+    expect(requests(ws, 'Group.SetMute')).toEqual([expect.objectContaining({ params: { id: 'g2', mute: false } })]);
+    expect(screen.queryByText('Group muted')).not.toBeInTheDocument();
+  });
+
   it('shows the average client volume on the group slider', () => {
     renderGroup('g1');
     expect(screen.getAllByRole('slider', { name: / volume$/ })).toHaveLength(3);
@@ -176,6 +185,7 @@ describe('Group', () => {
     });
 
     it('pause a playing stream and skip tracks', async () => {
+      control.getStream('s1').properties.canGoPrevious = true;
       renderGroup('g1');
       await userEvent.click(screen.getByRole('button', { name: 'Pause' }));
       await userEvent.click(screen.getByRole('button', { name: 'Next' }));
@@ -186,6 +196,17 @@ describe('Group', () => {
         { id: 's1', command: 'next' },
         { id: 's1', command: 'previous' },
       ]);
+    });
+
+    it('disables what the stream does not support', () => {
+      const properties = control.getStream('s1').properties;
+      properties.canGoNext = false;
+      properties.canPause = false;
+      renderGroup('g1');
+
+      expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
     });
 
     it('play a paused stream', async () => {

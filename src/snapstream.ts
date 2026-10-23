@@ -42,6 +42,10 @@ const CLOCK_JUMP_THRESHOLD_MS = 20; // well above the few ms of jitter
 const CLOCK_JUMP_SAMPLES = 3; // consecutive offsets beyond it that mean a jump
 
 const RECONNECT_DELAY_MS = 1000;
+// A connection that stays open after a network change can stop delivering
+// anything; the server answers time requests even while no audio comes in,
+// so one that goes this long without a reply is replaced
+const STREAM_TIMEOUT_MS = 10000;
 
 // declare AudioContext.outputLatency and getOutputTimestamp for the ts
 // compiler; standardized-audio-context wraps neither
@@ -468,10 +472,36 @@ class AudioStream {
             }
             pos++;
           }
-          if (pcmChunk.isEndOfChunk()) this.chunk = this.chunks.shift();
+          if (pcmChunk.isEndOfChunk()) {
+            const endMs = pcmChunk.startMs();
+            this.chunk = this.chunks.shift();
+            const silentFrames = this.alignNextChunk(endMs, Math.max(0, readFrames - read));
+            left.fill(0, pos, pos + silentFrames);
+            right.fill(0, pos, pos + silentFrames);
+            pos += silentFrames;
+            read += silentFrames;
+          }
         }
       }
     }
+  }
+
+  // Chunks usually follow each other seamlessly, but the server's timestamps
+  // can jump, e.g. after a dropout. Aligns the next chunk with the server
+  // time expectedMs the previous one ended at: skips its frames that start
+  // before it, dropping chunks that end before it, and returns the silent
+  // frames (at most maxFrames) that fill a gap up to it. Differences within
+  // the hard sync threshold are left to the soft sync.
+  private alignNextChunk(expectedMs: number, maxFrames: number): number {
+    while (this.chunk) {
+      const gap = this.chunk.startMs() - expectedMs;
+      if (gap > HARD_SYNC_THRESHOLD_MS) return Math.min(maxFrames, Math.floor(gap * this._sampleFormat.msRate()));
+      if (gap >= -HARD_SYNC_THRESHOLD_MS) return 0;
+      this.chunk.readFrames(Math.ceil(-gap * this.chunk.sampleFormat.msRate()));
+      if (!this.chunk.isEndOfChunk()) return 0;
+      this.chunk = this.chunks.shift();
+    }
+    return 0;
   }
 }
 
@@ -860,6 +890,7 @@ class SnapStream {
       hello.hostname = 'Snapweb client';
       hello.uniqueId = getClientId();
       this.sendMessage(hello);
+      this.lastReply = Date.now();
       // The server may have restarted with another clock
       this.timeProvider.reset();
       this.syncBurst();
@@ -870,29 +901,61 @@ class SnapStream {
     };
     socket.onclose = () => {
       console.info('Stream disconnected, reconnecting in ' + RECONNECT_DELAY_MS + ' ms');
-      this.stopSync();
-      this.reconnectHandle = window.setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
+      this.reconnect();
     };
+  }
+
+  // Drops the connection, if still open, and connects again after a delay
+  private reconnect() {
+    this.stopSync();
+    this.closeSocket();
+    window.clearTimeout(this.reconnectHandle);
+    this.reconnectHandle = window.setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
+  }
+
+  // Detached first, so nothing it still delivers gets handled
+  private closeSocket() {
+    const socket = this.streamsocket;
+    if (!socket) return;
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = null;
+    socket.onclose = null;
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
+    this.streamsocket = undefined;
   }
 
   private onMessage(msg: MessageEvent) {
     if (this.stopped) return;
-    const type = new DataView(msg.data).getUint16(0, true);
-    switch (type) {
-      case MessageType.CodecHeader:
-        this.handleCodecHeader(new CodecMessage(msg.data));
-        break;
-      case MessageType.WireChunk:
-        this.handleWireChunk(msg.data);
-        break;
-      case MessageType.ServerSettings:
-        this.handleServerSettings(new ServerSettingsMessage(msg.data));
-        break;
-      case MessageType.Time:
-        this.handleTime(new TimeMessage(msg.data));
-        break;
-      default:
-        console.info('Message not handled, type: ' + type);
+    const data: ArrayBuffer = msg.data;
+    if (!(data?.byteLength >= HEADER_SIZE)) {
+      console.warn('Ignoring a stream message shorter than its header');
+      return;
+    }
+    const type = new DataView(data).getUint16(0, true);
+    // A message too short for what its header says, or with malformed JSON
+    try {
+      switch (type) {
+        case MessageType.CodecHeader:
+          this.handleCodecHeader(new CodecMessage(data));
+          break;
+        case MessageType.WireChunk:
+          this.handleWireChunk(data);
+          break;
+        case MessageType.ServerSettings:
+          this.handleServerSettings(new ServerSettingsMessage(data));
+          break;
+        case MessageType.Time:
+          this.handleTime(new TimeMessage(data));
+          break;
+        default:
+          console.info('Message not handled, type: ' + type);
+      }
+    } catch (e) {
+      console.warn('Ignoring a malformed stream message of type ' + type + ': ' + e);
+      // Chunks can't be decoded without the codec header, which the server
+      // sends again on connect
+      if (type === MessageType.CodecHeader) this.reconnect();
     }
   }
 
@@ -959,6 +1022,7 @@ class SnapStream {
   }
 
   private handleTime(time: TimeMessage) {
+    this.lastReply = Date.now();
     const now = this.timeProvider.now();
     this.timeProvider.handleReply(
       time.refersTo,
@@ -983,6 +1047,11 @@ class SnapStream {
   }
 
   private syncTime() {
+    if (Date.now() - this.lastReply > STREAM_TIMEOUT_MS) {
+      console.warn('Stream stopped answering, reconnecting');
+      this.reconnect();
+      return;
+    }
     const t = new TimeMessage();
     t.latency.setMilliseconds(this.timeProvider.now());
     this.sendMessage(t);
@@ -1027,14 +1096,7 @@ class SnapStream {
     this.stopped = true;
     this.stopSync();
     window.clearTimeout(this.reconnectHandle);
-    const socket = this.streamsocket;
-    if (socket) {
-      socket.onopen = null;
-      socket.onmessage = null;
-      socket.onerror = null;
-      socket.onclose = null;
-      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
-    }
+    this.closeSocket();
     this.closeAudioContext();
     this.decoder?.dispose();
     this.decoder = undefined;
@@ -1084,6 +1146,8 @@ class SnapStream {
   syncHandle: number = -1;
   syncBurstHandles: number[] = [];
   reconnectHandle: number = -1;
+  // When the last time reply, or the connection, came in
+  lastReply: number = 0;
   audioBuffers: Array<PlayBuffer> = new Array<PlayBuffer>();
   freeBuffers: Array<IAudioBuffer> = new Array<IAudioBuffer>();
 

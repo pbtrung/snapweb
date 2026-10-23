@@ -206,6 +206,25 @@ describe('SnapWeb', () => {
       expect(screen.queryByText('Deleted host-c3')).not.toBeInTheDocument();
     });
 
+    it('drops a pending delete when the server changes, which may know another client by its id', async () => {
+      render(<SnapWeb />);
+      const old = connect();
+      await deleteClient('host-c3');
+      await user.click(screen.getByRole('button', { name: 'Open settings' }));
+      const host = screen.getByLabelText('Snapserver host');
+      await user.clear(host);
+      await user.type(host, 'ws://other:1780');
+      await user.click(screen.getByRole('button', { name: 'OK' }));
+      const other = connect(socket('ws://other:1780/jsonrpc'));
+      act(() => {
+        vi.advanceTimersByTime(10000);
+      });
+
+      expect(screen.queryByText('Deleted host-c3')).not.toBeInTheDocument();
+      expect(deleteRequests(old)).toEqual([]);
+      expect(deleteRequests(other)).toEqual([]);
+    });
+
     it('keeps the client out of the settings once deleted while they are open', async () => {
       render(<SnapWeb />);
       const ws = connect();
@@ -661,6 +680,17 @@ describe('SnapWeb', () => {
     expect(listeners.size).toBe(initial);
     unmount();
     expect(listeners.size).toBe(0);
+  });
+
+  it('stops local playback on unmount', async () => {
+    const { unmount } = render(<SnapWeb />);
+    connect();
+    await userEvent.click(screen.getByRole('button', { name: 'Play on this device' }));
+    await waitFor(() => expect(snapStream.created).toHaveLength(1));
+    unmount();
+
+    expect(snapStream.stop).toHaveBeenCalledTimes(1);
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
   });
 
   it('disconnects on unmount', () => {

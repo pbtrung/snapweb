@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import { SnapControl, Snapcast, averageVolume, base64, needsLogin } from '../../src/snapcontrol';
 import { authToken } from '../../src/config';
 import { FakeWebSocket } from '../helpers/fakeWebSocket';
-import { quietConsole, requests } from '../helpers/snapControl';
+import { connectedControl, quietConsole, requests } from '../helpers/snapControl';
 import { makeClient, makeServerStatus, makeStream } from '../fixtures/serverStatus';
 
 describe('Snapcast model', () => {
@@ -253,15 +253,16 @@ describe('SnapControl', () => {
       expect(control.getGroup('g1').stream_id).toBe('s1');
     });
 
-    it('refetches the status when the status request fails', () => {
+    it('refetches the status when the status request fails', async () => {
       vi.useFakeTimers();
       const ws = connected();
-      control.setClients('g1', ['c1', 'c2', 'gone']);
+      const regroup = control.setClients('g1', ['c1', 'c2', 'gone']);
       const failed = ws.lastSent().id;
 
       expect(() =>
         ws.receive({ id: failed, jsonrpc: '2.0', error: { code: -32603, message: 'Client not found' } }),
       ).not.toThrow();
+      await expect(regroup).rejects.toThrow('Client not found');
       vi.advanceTimersByTime(1000);
       expect(ws.lastSent()).toMatchObject({ method: 'Server.GetStatus' });
       expect(ws.lastSent().id).not.toBe(failed);
@@ -454,8 +455,8 @@ describe('SnapControl', () => {
       expect(control.getGroup('g1').stream_id).toBe('s2');
     });
 
-    it('sets group clients and reloads the server from the response', () => {
-      control.setClients('g1', ['c1', 'c2', 'c3']);
+    it('sets group clients and reloads the server from the response', async () => {
+      const regroup = control.setClients('g1', ['c1', 'c2', 'c3']);
       const request = ws.lastSent();
       expect(request).toMatchObject({ method: 'Group.SetClients', params: { id: 'g1', clients: ['c1', 'c2', 'c3'] } });
 
@@ -463,6 +464,7 @@ describe('SnapControl', () => {
       status.groups[0].clients.push(status.groups[1].clients[0]);
       status.groups.pop();
       ws.receive({ id: request.id, jsonrpc: '2.0', result: { server: status } });
+      await regroup;
 
       expect(control.getGroup('g1').clients).toHaveLength(3);
       expect(onChange).toHaveBeenCalledTimes(1);
@@ -653,11 +655,13 @@ describe('SnapControl', () => {
       control.setStream('g1', 's2');
       control.muteGroup('g1', true);
       control.setVolume('c1', 10);
+      expect(ws.sent).toHaveLength(3);
       for (const request of [...ws.sent]) failRequest(ws, request);
 
       vi.advanceTimersByTime(1000);
       expect(requests(ws, 'Server.GetStatus')).toHaveLength(1);
-      vi.advanceTimersByTime(60000);
+      // Within the request timeout, after which an unanswered status is retried
+      vi.advanceTimersByTime(10000);
       expect(requests(ws, 'Server.GetStatus')).toHaveLength(1);
     });
 
@@ -782,7 +786,10 @@ describe('SnapControl', () => {
       reply(ws, requests(ws, 'Server.GetToken')[0], { token: 'jwt' });
       await login;
 
-      expect(window.sessionStorage.getItem('auth.token')).toBe('jwt');
+      expect(JSON.parse(window.sessionStorage.getItem('auth.token')!)).toEqual({
+        server: 'ws://snapserver:1780',
+        token: 'jwt',
+      });
       expect(window.localStorage.getItem('auth.token')).toBeNull();
     });
 
@@ -794,7 +801,10 @@ describe('SnapControl', () => {
       reply(ws, requests(ws, 'Server.GetToken')[0], { token: 'jwt' });
       await login;
 
-      expect(window.localStorage.getItem('auth.token')).toBe('jwt');
+      expect(JSON.parse(window.localStorage.getItem('auth.token')!)).toEqual({
+        server: 'ws://snapserver:1780',
+        token: 'jwt',
+      });
       expect(window.sessionStorage.getItem('auth.token')).toBeNull();
     });
 
@@ -945,6 +955,145 @@ describe('SnapControl', () => {
       needingLogin();
       control.forgetLogin();
       expect(onAuthRequired).toHaveBeenLastCalledWith(control, false);
+    });
+
+    it('does not bring back a login forgotten while its token was requested', async () => {
+      const ws = needingLogin();
+      const login = control.login('alice', 'secret', true);
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      const getToken = requests(ws, 'Server.GetToken')[0];
+      control.forgetLogin();
+      reply(ws, getToken, { token: 'jwt' });
+
+      await expect(login).rejects.toThrow('Login cancelled');
+      expect(control.loggedIn).toBe(false);
+      expect(authToken.get()).toBeUndefined();
+    });
+
+    it('never sends a login to another server connected to while its token was requested', async () => {
+      const ws = needingLogin();
+      const login = control.login('alice', 'secret', false);
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      control.forgetLogin();
+      control.connect('ws://other:1780');
+
+      await expect(login).rejects.toThrow('Login cancelled');
+      expect(control.basic).toBeUndefined();
+      const other = FakeWebSocket.latest();
+      other.open();
+      expect(requests(other, 'Server.Authenticate')).toHaveLength(0);
+    });
+
+    it('keeps the login held in memory for the server that accepted it only', async () => {
+      const ws = needingLogin();
+      const login = control.login('alice', 'secret', false);
+      reply(ws, ws.lastSent(), 'ok');
+      await settle();
+      fail(ws, requests(ws, 'Server.GetToken')[0], { code: -32601, message: 'Method not found' });
+      await login;
+
+      control.connect('ws://other:1780');
+      const other = FakeWebSocket.latest();
+      other.open();
+      expect(requests(other, 'Server.Authenticate')).toHaveLength(0);
+      expect(control.loggedIn).toBe(false);
+    });
+
+    it('uses a stored token only for the server that issued it', () => {
+      authToken.set('jwt', true, 'ws://snapserver:1780');
+      control.connect('ws://other:1780');
+      const other = FakeWebSocket.latest();
+      other.open();
+      expect(requests(other, 'Server.Authenticate')).toHaveLength(0);
+
+      const ws = opened();
+      expect(requests(ws, 'Server.Authenticate')[0].params).toEqual({ scheme: 'Bearer', param: 'jwt' });
+    });
+
+    it('keeps the Basic login when the token request times out', async () => {
+      vi.useFakeTimers();
+      const ws = needingLogin();
+      const login = control.login('alice', 'secret', false);
+      reply(ws, ws.lastSent(), 'ok');
+      await vi.advanceTimersByTimeAsync(0);
+      // The server answers the keepalive, but never the token request
+      for (let t = 0; t < 15000; t += 5000) {
+        await vi.advanceTimersByTimeAsync(5000);
+        for (const keepalive of requests(ws, 'Server.GetRPCVersion')) reply(ws, keepalive, { major: 2 });
+      }
+
+      await login;
+      expect(control.basic).toBe(base64('alice:secret'));
+    });
+  });
+
+  describe('authentication deadline', () => {
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it('reconnects when Server.Authenticate is never answered', async () => {
+      vi.useFakeTimers();
+      authToken.set('jwt', true);
+      control.connect('ws://snapserver:1780');
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      for (let t = 0; t < 20000; t += 10000) {
+        await vi.advanceTimersByTimeAsync(10000);
+        for (const keepalive of requests(ws, 'Server.GetRPCVersion')) {
+          ws.receive({ id: keepalive.id, jsonrpc: '2.0', result: { major: 2 } });
+        }
+      }
+
+      expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+      expect(FakeWebSocket.latest()).not.toBe(ws);
+    });
+  });
+
+  describe('malformed messages', () => {
+    let ws: FakeWebSocket;
+
+    beforeEach(() => {
+      ({ control, ws } = connectedControl());
+    });
+
+    it('ignores JSON that is not an object', () => {
+      expect(() => ws.receive(null)).not.toThrow();
+      expect(() => ws.receive(42)).not.toThrow();
+      expect(() => ws.receive([null])).not.toThrow();
+      expect(control.server.groups).toHaveLength(2);
+    });
+
+    it('keeps the model and refetches after a malformed status', () => {
+      vi.useFakeTimers();
+      control.connect('ws://snapserver:1780');
+      ws = FakeWebSocket.latest();
+      ws.open();
+      expect(() =>
+        ws.receive({ id: ws.lastSent().id, jsonrpc: '2.0', result: { server: { groups: 1 } } }),
+      ).not.toThrow();
+      vi.advanceTimersByTime(1000);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(2);
+    });
+  });
+
+  describe('request deadlines', () => {
+    it('forgets an unanswered request and refetches the status', () => {
+      vi.useFakeTimers();
+      const { control, ws } = connectedControl();
+      control.setStream('g1', 's2');
+      // The keepalive is answered, the request never is
+      for (let t = 0; t < 20000; t += 10000) {
+        vi.advanceTimersByTime(10000);
+        for (const keepalive of requests(ws, 'Server.GetRPCVersion')) {
+          ws.receive({ id: keepalive.id, jsonrpc: '2.0', result: { major: 2 } });
+        }
+      }
+      vi.advanceTimersByTime(1000);
+      expect(requests(ws, 'Server.GetStatus')).toHaveLength(1);
+      control.disconnect();
     });
   });
 });

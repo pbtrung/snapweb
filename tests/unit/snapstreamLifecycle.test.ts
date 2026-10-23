@@ -59,7 +59,7 @@ const audio = vi.hoisted(() => {
 });
 vi.mock('standardized-audio-context', () => ({ AudioContext: audio.FakeAudioContext }));
 
-const { HelloMessage, SnapStream } = await import('../../src/snapstream');
+const { HelloMessage, SnapStream, TimeMessage } = await import('../../src/snapstream');
 
 // A CodecHeader message for 16 bit stereo PCM at the given rate
 function pcmCodecHeader(rate: number): ArrayBuffer {
@@ -174,6 +174,48 @@ describe('SnapStream lifecycle', () => {
     onmessage?.({ data: pcmCodecHeader(48000) } as any);
 
     expect(audio.FakeAudioContext.instances[0].playing()).toBe(0);
+  });
+
+  it('replaces a connection that stops answering time requests', () => {
+    const { ws } = start();
+    vi.advanceTimersByTime(12000);
+
+    expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('keeps a connection that answers time requests, even without audio', () => {
+    const { ws } = start();
+    let answered = 0;
+    for (let t = 0; t < 30000; t += 1000) {
+      vi.advanceTimersByTime(1000);
+      for (const sent of ws.sent.slice(answered)) {
+        const request = new TimeMessage(sent);
+        if (request.type !== 4) continue;
+        const reply = new TimeMessage();
+        reply.refersTo = request.id;
+        receive(ws, reply.serialize());
+      }
+      answered = ws.sent.length;
+    }
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('ignores a message shorter than its header', () => {
+    const { ws } = start();
+    expect(() => receive(ws, new ArrayBuffer(1))).not.toThrow();
+  });
+
+  it('reconnects for the codec header again when it is malformed', () => {
+    const { ws } = start();
+    const header = new ArrayBuffer(26);
+    new DataView(header).setUint16(0, 1, true);
+    expect(() => receive(ws, header)).not.toThrow();
+    vi.advanceTimersByTime(1000);
+
+    expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
   it('reconnects after the connection drops', () => {

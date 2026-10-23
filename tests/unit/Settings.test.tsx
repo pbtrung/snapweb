@@ -174,16 +174,83 @@ describe('SettingsDialog', () => {
       ]);
     });
 
+    // Answers a Group.SetClients request with the status it leads to
+    function regrouped(request: { id: number }, groups: { id: string; clients: string[] }[]) {
+      const status = makeServerStatus();
+      const clients = status.groups.flatMap((group) => group.clients);
+      const byId = new Map(status.groups.map((group) => [group.id, group]));
+      status.groups = groups.map(({ id, clients: ids }) => ({
+        ...(byId.get(id) ?? { ...status.groups[0], id, name: '', stream_id: 's1', muted: false }),
+        clients: ids.map((clientId) => clients.find((client) => client.id === clientId)!),
+      }));
+      ws.receive({ id: request.id, jsonrpc: '2.0', result: { server: status } });
+    }
+
+    // Lets the next regrouping step run after a reply
+    async function settle() {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    }
+
     it('adds to groups before taking clients out of others', async () => {
       await openGroups();
       await userEvent.click(group('Group 1').getByRole('checkbox', { name: 'livingroom' }));
       await userEvent.click(group('Office').getByRole('checkbox', { name: 'Kitchen' }));
       await ok();
 
-      expect(requests(ws, 'Group.SetClients').map((request) => request.params)).toEqual([
+      const [request] = requests(ws, 'Group.SetClients');
+      expect(request.params).toEqual({ id: 'g2', clients: ['c1', 'c3'] });
+      // which leaves livingroom on its own in Group 1
+      regrouped(request, [
+        { id: 'g1', clients: ['c2'] },
         { id: 'g2', clients: ['c1', 'c3'] },
-        { id: 'g1', clients: [] },
       ]);
+      await settle();
+      expect(requests(ws, 'Group.SetClients')).toHaveLength(1);
+    });
+
+    it('swaps the clients of two groups, though the first step removes the second group', async () => {
+      await openGroups();
+      await userEvent.click(group('Group 1').getByRole('checkbox', { name: 'host-c3' }));
+      await userEvent.click(group('Office').getByRole('checkbox', { name: 'Kitchen' }));
+      await userEvent.click(group('Office').getByRole('checkbox', { name: 'livingroom' }));
+      await ok();
+
+      const [first] = requests(ws, 'Group.SetClients');
+      expect(first.params).toEqual({ id: 'g1', clients: ['c3'] });
+      // Office lost its only client, and the clients taken out of Group 1
+      // got groups of their own
+      regrouped(first, [
+        { id: 'g1', clients: ['c3'] },
+        { id: 'n1', clients: ['c1'] },
+        { id: 'n2', clients: ['c2'] },
+      ]);
+      await settle();
+
+      expect(requests(ws, 'Group.SetClients').slice(1)).toEqual([
+        expect.objectContaining({ params: { id: 'n1', clients: ['c1', 'c2'] } }),
+      ]);
+      regrouped(requests(ws, 'Group.SetClients')[1], [
+        { id: 'g1', clients: ['c3'] },
+        { id: 'n1', clients: ['c1', 'c2'] },
+      ]);
+      await settle();
+      // with what Office had
+      expect(requests(ws, 'Group.SetStream').map((request) => request.params)).toEqual([{ id: 'n1', stream_id: 's2' }]);
+      expect(requests(ws, 'Group.SetName').map((request) => request.params)).toEqual([{ id: 'n1', name: 'Office' }]);
+      expect(requests(ws, 'Group.SetMute').map((request) => request.params)).toEqual([{ id: 'n1', mute: true }]);
+    });
+
+    it('stops regrouping when a step fails', async () => {
+      await openGroups();
+      await userEvent.click(group('Group 1').getByRole('checkbox', { name: 'host-c3' }));
+      await userEvent.click(group('Office').getByRole('checkbox', { name: 'Kitchen' }));
+      await userEvent.click(group('Office').getByRole('checkbox', { name: 'livingroom' }));
+      await ok();
+
+      const [first] = requests(ws, 'Group.SetClients');
+      ws.receive({ id: first.id, jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' } });
+      await settle();
+      expect(requests(ws, 'Group.SetClients')).toHaveLength(1);
     });
 
     it('changes the stream on OK', async () => {
@@ -285,6 +352,26 @@ describe('SettingsDialog', () => {
       expect(control.getClient('c1').config.latency).toBe(0);
       expect(requests(ws, 'Client.SetName')).toHaveLength(0);
       expect(control.getClient('c1').getName()).toBe('Kitchen');
+    });
+
+    it('does not revert latencies it did not change on Cancel', async () => {
+      await openClient('Kitchen');
+      // changed elsewhere while the dialog is open
+      ws.receive({ jsonrpc: '2.0', method: 'Client.OnLatencyChanged', params: { id: 'c1', latency: 25 } });
+      await cancel();
+
+      expect(requests(ws, 'Client.SetLatency')).toHaveLength(0);
+      expect(control.getClient('c1').config.latency).toBe(25);
+    });
+
+    it('does not revert a latency changed elsewhere after it was edited', async () => {
+      const client = await openClient('Kitchen');
+      fireEvent.change(client.getByLabelText('Latency'), { target: { value: '25' } });
+      ws.receive({ jsonrpc: '2.0', method: 'Client.OnLatencyChanged', params: { id: 'c1', latency: 40 } });
+      await cancel();
+
+      expect(requests(ws, 'Client.SetLatency')).toHaveLength(1);
+      expect(control.getClient('c1').config.latency).toBe(40);
     });
 
     it('lets the latency field be cleared without sending anything', async () => {

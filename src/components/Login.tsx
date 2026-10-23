@@ -8,6 +8,8 @@ type LoginDialogProps = {
   // Rejects with a message for the user when the login fails
   onLogin: (username: string, password: string, remember: boolean) => Promise<void>;
   onCancel: () => void;
+  // The connection is unencrypted to another device
+  insecure?: boolean;
 };
 
 // Asks for the user name and password the Snapserver control API wants
@@ -56,6 +58,12 @@ export default function LoginDialog(props: LoginDialogProps) {
     >
       <div className="dialog-section" onKeyDown={handleKeyDown}>
         <p className="text-body-secondary">This Snapserver needs a login to be controlled.</p>
+        {props.insecure && (
+          <Alert variant="warning" className="py-2 small">
+            This connection isn't encrypted, so the user name and password can be read on the network. Open Snapweb over
+            HTTPS to keep them private.
+          </Alert>
+        )}
         {error && (
           <Alert variant="danger" className="py-2">
             {error}
