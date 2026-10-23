@@ -382,6 +382,10 @@ const KEEPALIVE_TIMEOUT_MS = 3 * KEEPALIVE_INTERVAL_MS;
 // failing isn't flooded with requests
 const STATUS_RETRY_MIN_MS = 1000;
 const STATUS_RETRY_MAX_MS = 30000;
+// A slider drag changes a volume on every input event, dozens of times a
+// second, so a client's volume is sent at most this often; the last one
+// set always goes out at the end
+const VOLUME_SEND_INTERVAL_MS = 100;
 // A request still unanswered after this is given up on
 const REQUEST_TIMEOUT_MS = 15000;
 // Methods Snapserver answers before the connection is authenticated
@@ -418,6 +422,12 @@ class SnapControl {
   // Requests held back while Server.Authenticate is answered, so they don't
   // reach the server before it
   private queue: { id: number; message: string }[] | null = null;
+  // Clients whose volume was sent within the interval, with the volume set
+  // since then that is still to be sent, if any
+  private volumeSends = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; pending?: { muted: boolean; percent: number } }
+  >();
   private refetchTimer: ReturnType<typeof setTimeout> | null = null;
   private refetchDelay: number = STATUS_RETRY_MIN_MS;
 
@@ -480,6 +490,9 @@ class SnapControl {
     this.timer = null;
     this.stopKeepalive();
     this.resetRequests();
+    // The next status brings the volumes in line
+    for (const { timer } of this.volumeSends.values()) clearTimeout(timer);
+    this.volumeSends.clear();
     const connection = this.connection;
     if (connection) {
       // Detach first, so nothing the old connection still delivers, including
@@ -760,10 +773,26 @@ class SnapControl {
     if (percent === client.config.volume.percent && (mute === undefined || mute === client.config.volume.muted)) return;
     client.config.volume.percent = percent;
     if (mute !== undefined) client.config.volume.muted = mute;
-    this.sendRequest('Client.SetVolume', {
-      id: client_id,
-      volume: { muted: client.config.volume.muted, percent: client.config.volume.percent },
-    });
+    this.sendVolume(client_id, { muted: client.config.volume.muted, percent: client.config.volume.percent });
+  }
+
+  // Sends a volume at once, unless one was sent for the client within the
+  // interval: then it goes out when the interval ends, replacing any other
+  // waiting there
+  private sendVolume(client_id: string, volume: { muted: boolean; percent: number }) {
+    const recent = this.volumeSends.get(client_id);
+    if (recent) {
+      recent.pending = volume;
+      return;
+    }
+    this.sendRequest('Client.SetVolume', { id: client_id, volume: volume });
+    const send: { timer: ReturnType<typeof setTimeout>; pending?: { muted: boolean; percent: number } } = {
+      timer: setTimeout(() => {
+        this.volumeSends.delete(client_id);
+        if (send.pending) this.sendVolume(client_id, send.pending);
+      }, VOLUME_SEND_INTERVAL_MS),
+    };
+    this.volumeSends.set(client_id, send);
   }
 
   public setClientName(client_id: string, name: string) {

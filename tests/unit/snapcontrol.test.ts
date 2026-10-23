@@ -382,6 +382,7 @@ describe('SnapControl', () => {
     });
 
     it('sets and clamps client volume', () => {
+      vi.useFakeTimers();
       control.setVolume('c1', 55);
       expect(ws.lastSent()).toMatchObject({
         jsonrpc: '2.0',
@@ -390,11 +391,43 @@ describe('SnapControl', () => {
       });
       expect(control.getClient('c1').config.volume.percent).toBe(55);
 
+      vi.advanceTimersByTime(100);
       control.setVolume('c1', 150, true);
       expect(ws.lastSent().params.volume).toEqual({ muted: true, percent: 100 });
 
+      vi.advanceTimersByTime(100);
       control.setVolume('c1', -5);
       expect(ws.lastSent().params.volume).toEqual({ muted: true, percent: 0 });
+    });
+
+    it('sends a client volume at most every 100 ms, ending with the last one set', () => {
+      vi.useFakeTimers();
+      control.setVolume('c1', 10);
+      control.setVolume('c1', 20);
+      control.setVolume('c1', 30, true);
+      control.setVolume('c2', 5);
+      // Every client has its own interval
+      expect(requests(ws, 'Client.SetVolume').map((m) => [m.params.id, m.params.volume])).toEqual([
+        ['c1', { muted: false, percent: 10 }],
+        ['c2', { muted: false, percent: 5 }],
+      ]);
+      expect(control.getClient('c1').config.volume).toEqual({ muted: true, percent: 30 });
+
+      vi.advanceTimersByTime(100);
+      expect(requests(ws, 'Client.SetVolume').slice(2)).toEqual([
+        expect.objectContaining({ params: { id: 'c1', volume: { muted: true, percent: 30 } } }),
+      ]);
+      vi.advanceTimersByTime(1000);
+      expect(requests(ws, 'Client.SetVolume')).toHaveLength(3);
+    });
+
+    it('drops volumes waiting to be sent on disconnect', () => {
+      vi.useFakeTimers();
+      control.setVolume('c1', 10);
+      control.setVolume('c1', 20);
+      control.disconnect();
+      vi.advanceTimersByTime(1000);
+      expect(requests(ws, 'Client.SetVolume')).toHaveLength(1);
     });
 
     it('rounds client volume to whole percents', () => {

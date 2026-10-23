@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Client from '../../src/components/Client';
 import { connectedControl, quietConsole, requests } from '../helpers/snapControl';
@@ -68,7 +68,10 @@ describe('Client', () => {
     expect(mute).toHaveAttribute('aria-pressed', 'true');
 
     await userEvent.click(mute);
-    expect(requests(ws, 'Client.SetVolume').slice(-1)[0].params.volume).toEqual({ muted: false, percent: 40 });
     expect(mute).toHaveAttribute('aria-pressed', 'false');
+    // Within 100 ms of the first, so sent at the end of that interval
+    await waitFor(() =>
+      expect(requests(ws, 'Client.SetVolume').slice(-1)[0].params.volume).toEqual({ muted: false, percent: 40 }),
+    );
   });
 });

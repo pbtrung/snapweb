@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Group from '../../src/components/Group';
@@ -14,6 +14,10 @@ describe('Group', () => {
   beforeEach(() => {
     quietConsole();
     ({ control, ws } = connectedControl());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   function renderGroup(id: string, showOffline = false, deletedClientIds: string[] = []) {
@@ -95,12 +99,15 @@ describe('Group', () => {
     expect(groupSlider()).toHaveValue('80');
   });
 
-  // Drag the group slider through the given values in one gesture
+  // Drag the group slider through the given values in one gesture, and wait
+  // for the last volumes to be sent
   function drag(...values: number[]) {
+    vi.useFakeTimers();
     const slider = groupSlider();
     fireEvent.pointerDown(slider);
     for (const value of values) fireEvent.change(slider, { target: { value } });
     fireEvent.pointerUp(slider);
+    vi.advanceTimersByTime(100);
   }
 
   it('keeps volumes finite when a drag starts at 100 and returns to it', () => {
@@ -111,6 +118,34 @@ describe('Group', () => {
     const sent = requests(ws, 'Client.SetVolume').map((m) => m.params.volume.percent);
     expect(sent.every(Number.isFinite)).toBe(true);
     expect(sent.slice(-2)).toEqual([100, 100]);
+  });
+
+  it('sends each client volume at most every 100 ms while dragging, and the last one at the end', () => {
+    renderGroup('g1');
+    vi.useFakeTimers();
+    const slider = groupSlider();
+    fireEvent.pointerDown(slider);
+    for (const value of [50, 40, 30, 20]) fireEvent.change(slider, { target: { value } });
+    fireEvent.pointerUp(slider);
+
+    // The first step at once
+    expect(requests(ws, 'Client.SetVolume').map((m) => [m.params.id, m.params.volume.percent])).toEqual([
+      ['c1', 33],
+      ['c2', 67],
+    ]);
+    expect(groupSlider()).toHaveValue('20');
+    vi.advanceTimersByTime(100);
+    // then only the last one, skipping those in between
+    expect(
+      requests(ws, 'Client.SetVolume')
+        .slice(2)
+        .map((m) => [m.params.id, m.params.volume.percent]),
+    ).toEqual([
+      ['c1', 13],
+      ['c2', 27],
+    ]);
+    vi.advanceTimersByTime(1000);
+    expect(requests(ws, 'Client.SetVolume')).toHaveLength(4);
   });
 
   it('raises clients from a group volume of 0', () => {
